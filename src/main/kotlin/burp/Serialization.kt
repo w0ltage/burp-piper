@@ -1,13 +1,13 @@
 package burp
 
 import com.google.protobuf.ByteString
-import org.snakeyaml.engine.v1.api.Load
-import org.snakeyaml.engine.v1.api.LoadSettingsBuilder
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.lang.RuntimeException
 import java.util.zip.DeflaterOutputStream
 import java.util.zip.InflaterInputStream
+import org.snakeyaml.engine.v1.api.Load
+import org.snakeyaml.engine.v1.api.LoadSettingsBuilder
 
 fun configFromYaml(value: String): Piper.Config {
     val ls = Load(LoadSettingsBuilder().build())
@@ -18,9 +18,17 @@ fun configFromYaml(value: String): Piper.Config {
         copyListOfStructured("menuItems", b::addMenuItem, UserActionToolFromMap)
         copyListOfStructured("httpListeners", b::addHttpListener, ::httpListenerFromMap)
         copyListOfStructured("commentators", b::addCommentator, ::commentatorFromMap)
-        copyListOfStructured("intruderPayloadProcessors", b::addIntruderPayloadProcessor, ::minimalToolFromMap)
+        copyListOfStructured(
+                "intruderPayloadProcessors",
+                b::addIntruderPayloadProcessor,
+                ::minimalToolFromMap
+        )
         copyListOfStructured("highlighters", b::addHighlighter, ::highlighterFromMap)
-        copyListOfStructured("intruderPayloadGenerators", b::addIntruderPayloadGenerator, ::minimalToolFromMap)
+        copyListOfStructured(
+                "intruderPayloadGenerators",
+                b::addIntruderPayloadGenerator,
+                ::minimalToolFromMap
+        )
     }
     return b.build()
 }
@@ -48,9 +56,10 @@ fun messageViewerFromMap(source: Map<String, Any>): Piper.MessageViewer {
 }
 
 fun minimalToolFromMap(source: Map<String, Any>): Piper.MinimalTool {
-    val b = Piper.MinimalTool.newBuilder()!!
-            .setName(source.stringOrDie("name"))
-            .setCmd(commandInvocationFromMap(source))
+    val b =
+            Piper.MinimalTool.newBuilder()!!
+                    .setName(source.stringOrDie("name"))
+                    .setCmd(commandInvocationFromMap(source))
     val scope = source["scope"]
     if (scope != null && scope is String) {
         b.scope = enumFromString(scope, Piper.MinimalTool.Scope::class.java)
@@ -60,11 +69,14 @@ fun minimalToolFromMap(source: Map<String, Any>): Piper.MinimalTool {
 }
 
 fun httpListenerFromMap(source: Map<String, Any>): Piper.HttpListener {
-    val b = Piper.HttpListener.newBuilder()!!
-            .setScope(enumFromString(source.stringOrDie("scope"),
-                    Piper.HttpListenerScope::class.java))
-    val ss = source.stringSequence("tool", required = false)
-            .map { enumFromString(it, BurpTool::class.java) }
+    val b =
+            Piper.HttpListener.newBuilder()!!.setScope(
+                    enumFromString(source.stringOrDie("scope"), Piper.HttpListenerScope::class.java)
+            )
+    val ss =
+            source.stringSequence("tool", required = false).map {
+                enumFromString(it, BurpTool::class.java)
+            }
     if (ss.isNotEmpty()) b.setToolSet(ss.toSet())
     source.copyBooleanFlag("ignoreOutput", b::setIgnoreOutput)
     val minimalToolMap = source.toMutableMap()
@@ -73,13 +85,18 @@ fun httpListenerFromMap(source: Map<String, Any>): Piper.HttpListener {
 }
 
 fun commandInvocationFromMap(source: Map<String, Any>): Piper.CommandInvocation {
-    val b = Piper.CommandInvocation.newBuilder()!!
-            .addAllPrefix(source.stringSequence("prefix"))
-            .addAllPostfix(source.stringSequence("postfix", required = false))
-            .setInputMethod(enumFromString(source.stringOrDie("inputMethod"),
-                    Piper.CommandInvocation.InputMethod::class.java))
-            .addAllRequiredInPath(source.stringSequence("requiredInPath", required = false))
-            .addAllExitCode(source.intSequence("exitCode"))
+    val b =
+            Piper.CommandInvocation.newBuilder()!!
+                    .addAllPrefix(source.stringSequence("prefix"))
+                    .addAllPostfix(source.stringSequence("postfix", required = false))
+                    .setInputMethod(
+                            enumFromString(
+                                    source.stringOrDie("inputMethod"),
+                                    Piper.CommandInvocation.InputMethod::class.java
+                            )
+                    )
+                    .addAllRequiredInPath(source.stringSequence("requiredInPath", required = false))
+                    .addAllExitCode(source.intSequence("exitCode"))
     with(source) {
         copyBooleanFlag("passHeaders", b::setPassHeaders)
         copyStructured("stdout", b::setStdout, ::messageMatchFromMap)
@@ -106,8 +123,7 @@ fun messageMatchFromMap(source: Map<String, Any>): Piper.MessageMatch {
 
 object HeaderMatchFromMap : (Map<String, Any>) -> Piper.HeaderMatch {
     override fun invoke(source: Map<String, Any>): Piper.HeaderMatch {
-        val b = Piper.HeaderMatch.newBuilder()!!
-                .setHeader(source.stringOrDie("header"))
+        val b = Piper.HeaderMatch.newBuilder()!!.setHeader(source.stringOrDie("header"))
         source.copyStructured("regex", b::setRegex, RegExpFromMap)
         return b.build()
     }
@@ -115,10 +131,11 @@ object HeaderMatchFromMap : (Map<String, Any>) -> Piper.HeaderMatch {
 
 object RegExpFromMap : (Map<String, Any>) -> Piper.RegularExpression {
     override fun invoke(source: Map<String, Any>): Piper.RegularExpression {
-        val b = Piper.RegularExpression.newBuilder()!!
-                .setPattern(source.stringOrDie("pattern"))
-        val ss = source.stringSequence("flags", required = false)
-                .map { enumFromString(it, RegExpFlag::class.java) }
+        val b = Piper.RegularExpression.newBuilder()!!.setPattern(source.stringOrDie("pattern"))
+        val ss =
+                source.stringSequence("flags", required = false).map {
+                    enumFromString(it, RegExpFlag::class.java)
+                }
         if (ss.isNotEmpty()) b.setFlagSet(ss.toSet())
         return b.build()
     }
@@ -126,8 +143,7 @@ object RegExpFromMap : (Map<String, Any>) -> Piper.RegularExpression {
 
 object UserActionToolFromMap : (Map<String, Any>) -> Piper.UserActionTool {
     override fun invoke(source: Map<String, Any>): Piper.UserActionTool {
-        val b = Piper.UserActionTool.newBuilder()!!
-                .setCommon(minimalToolFromMap(source))
+        val b = Piper.UserActionTool.newBuilder()!!.setCommon(minimalToolFromMap(source))
         source.copyBooleanFlag("hasGUI", b::setHasGUI)
         source.copyBooleanFlag("avoidPipe", b::setAvoidPipe)
         source.copyInt("minInputs", b::setMinInputs)
@@ -143,14 +159,22 @@ fun Map<String, Any>.copyInt(key: String, setter: (Int) -> Any) {
     }
 }
 
-fun <E> Map<String, Any>.copyStructured(key: String, setter: (E) -> Any, transform: (Map<String, Any>) -> E) {
+fun <E> Map<String, Any>.copyStructured(
+        key: String,
+        setter: (E) -> Any,
+        transform: (Map<String, Any>) -> E
+) {
     when (val value = this[key] ?: return) {
         is Map<*, *> -> setter(transform(value as Map<String, Any>))
         else -> throw RuntimeException("Invalid value for $key: $value")
     }
 }
 
-fun <E> Map<String, Any>.copyListOfStructured(key: String, setter: (E) -> Any, transform: (Map<String, Any>) -> E) {
+fun <E> Map<String, Any>.copyListOfStructured(
+        key: String,
+        setter: (E) -> Any,
+        transform: (Map<String, Any>) -> E
+) {
     when (val value = this[key] ?: return) {
         is List<*> -> value.forEach { setter(transform(it as Map<String, Any>)) }
         else -> throw RuntimeException("Invalid value for $key: $value")
@@ -184,14 +208,17 @@ fun Map<String, Any>.stringOrDie(key: String): String {
 
 fun Map<String, Any>.stringSequence(key: String, required: Boolean = true): Iterable<String> {
     return when (val value = this[key]) {
-        null -> if (required) throw RuntimeException("Missing list for $key") else return emptyList()
-        is List<*> -> value.map {
-            when (it) {
-                null -> throw RuntimeException("Invalid item for $key")
-                is String -> return@map it
-                else -> throw RuntimeException("Invalid value for $key: $it")
-            }
-        }
+        null ->
+                if (required) throw RuntimeException("Missing list for $key")
+                else return emptyList()
+        is List<*> ->
+                value.map {
+                    when (it) {
+                        null -> throw RuntimeException("Invalid item for $key")
+                        is String -> return@map it
+                        else -> throw RuntimeException("Invalid value for $key: $it")
+                    }
+                }
         else -> throw RuntimeException("Invalid value for $key: $value")
     }
 }
@@ -199,13 +226,14 @@ fun Map<String, Any>.stringSequence(key: String, required: Boolean = true): Iter
 fun Map<String, Any>.intSequence(key: String): Iterable<Int> {
     return when (val value = this[key]) {
         null -> emptyList()
-        is List<*> -> value.map {
-            when (it) {
-                null -> throw RuntimeException("Invalid item for $key")
-                is Int -> return@map it
-                else -> throw RuntimeException("Invalid value for $key: $it")
-            }
-        }
+        is List<*> ->
+                value.map {
+                    when (it) {
+                        null -> throw RuntimeException("Invalid item for $key")
+                        is Int -> return@map it
+                        else -> throw RuntimeException("Invalid value for $key: $it")
+                    }
+                }
         else -> throw RuntimeException("Invalid value for $key: $value")
     }
 }
@@ -221,8 +249,7 @@ fun pad4(value: ByteArray): ByteArray {
 }
 
 @Suppress("SpellCheckingInspection")
-fun unpad4(value: ByteArray): ByteArray =
-    value.dropLast(value.last().toInt()).toByteArray()
+fun unpad4(value: ByteArray): ByteArray = value.dropLast(value.last().toInt()).toByteArray()
 
 fun compress(value: ByteArray): ByteArray {
     val bos = ByteArrayOutputStream()
@@ -231,18 +258,19 @@ fun compress(value: ByteArray): ByteArray {
 }
 
 fun decompress(value: ByteArray): ByteArray =
-    InflaterInputStream(value.inputStream()).use(InputStream::readBytes)
+        InflaterInputStream(value.inputStream()).use(InputStream::readBytes)
 
-fun Piper.Config.toSettings(): Map<String, Any> = mutableMapOf<String, Any>().apply {
-    add("messageViewers", messageViewerList, Piper.MessageViewer::toMap)
-    add("menuItems", menuItemList, Piper.UserActionTool::toMap)
-    add("macros", macroList, Piper.MinimalTool::toMap)
-    add("intruderPayloadProcessors", intruderPayloadProcessorList, Piper.MinimalTool::toMap)
-    add("httpListeners", httpListenerList, Piper.HttpListener::toMap)
-    add("commentators", commentatorList, Piper.Commentator::toMap)
-    add("highlighters", highlighterList, Piper.Highlighter::toMap)
-    add("intruderPayloadGenerators", intruderPayloadGeneratorList, Piper.MinimalTool::toMap)
-}
+fun Piper.Config.toSettings(): Map<String, Any> =
+        mutableMapOf<String, Any>().apply {
+            add("messageViewers", messageViewerList, Piper.MessageViewer::toMap)
+            add("menuItems", menuItemList, Piper.UserActionTool::toMap)
+            add("macros", macroList, Piper.MinimalTool::toMap)
+            add("intruderPayloadProcessors", intruderPayloadProcessorList, Piper.MinimalTool::toMap)
+            add("httpListeners", httpListenerList, Piper.HttpListener::toMap)
+            add("commentators", commentatorList, Piper.Commentator::toMap)
+            add("highlighters", highlighterList, Piper.Highlighter::toMap)
+            add("intruderPayloadGenerators", intruderPayloadGeneratorList, Piper.MinimalTool::toMap)
+        }
 
 fun <E> MutableMap<String, Any>.add(key: String, value: List<E>, transform: (E) -> Any) {
     if (value.isNotEmpty()) this[key] = value.map(transform)
@@ -292,7 +320,8 @@ fun Piper.MinimalTool.toMap(): MutableMap<String, Any> {
     val m = this.cmd.toMap()
     m["name"] = this.name!!
     if (this.hasFilter()) m["filter"] = this.filter.toMap()
-    if (this.scope != Piper.MinimalTool.Scope.REQUEST_RESPONSE) m["scope"] = this.scope.name.toLowerCase()
+    if (this.scope != Piper.MinimalTool.Scope.REQUEST_RESPONSE)
+            m["scope"] = this.scope.name.toLowerCase()
     return m
 }
 
