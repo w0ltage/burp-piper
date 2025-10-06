@@ -16,23 +16,26 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-apply plugin: 'java'
-apply plugin: 'kotlin'
-apply plugin: 'com.google.protobuf'
+plugins {
+    id 'java'
+    id 'org.jetbrains.kotlin.jvm' version '1.9.24'
+    id 'com.google.protobuf' version '0.9.4'
+}
 
 sourceCompatibility = 1.8
 targetCompatibility = 1.8
 
-buildscript {
-    ext.kotlin_version = '1.4.10'
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
 
-    repositories {
-        mavenCentral()
-    }
-    dependencies {
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.5'
-    }
+compileKotlin {
+    kotlinOptions.jvmTarget = '1.8'
+}
+
+compileTestKotlin {
+    kotlinOptions.jvmTarget = '1.8'
 }
 
 
@@ -41,17 +44,18 @@ repositories {
 }
 
 dependencies {
-    compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-    compile "com.google.protobuf:protobuf-lite:3.0.0"
-    compile "org.snakeyaml:snakeyaml-engine:1.0"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.24"
+    implementation "com.google.protobuf:protobuf-lite:3.0.0"
+    implementation "org.snakeyaml:snakeyaml-engine:1.0"
 
-    compile 'net.portswigger.burp.extender:burp-extender-api:1.7.22'
-    compile 'com.esotericsoftware:minlog:1.3'
+    implementation 'net.portswigger.burp.extender:burp-extender-api:1.7.22'
+    implementation 'com.esotericsoftware:minlog:1.3'
 
-    testCompile 'org.junit.jupiter:junit-jupiter:5.7.2'
-    testCompile 'org.mockito:mockito-core:3.12.4'
-    testCompile 'org.mockito:mockito-inline:3.12.4'
-    testRuntime 'org.junit.platform:junit-platform-launcher:1.7.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.7.2'
+    testImplementation 'org.mockito:mockito-core:3.12.4'
+    testImplementation 'org.mockito:mockito-inline:3.12.4'
+    testImplementation 'org.mockito.kotlin:mockito-kotlin:3.2.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.7.2'
 }
 
 test {
@@ -60,12 +64,11 @@ test {
         events "passed", "skipped", "failed"
         exceptionFormat "full"
     }
+    // Include main resources in test classpath for resource loading
+    classpath += sourceSets.main.runtimeClasspath
 }
 
 jar {
-    sourceSets {
-        sourceSets.main.java.srcDirs += 'build/generated/source/proto/main/java'
-    }
     from('src/main/yaml') {
         include('*.yaml')
     }
@@ -73,7 +76,7 @@ jar {
 		include('mime.pb')
 	}
     from {
-        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
 }
 

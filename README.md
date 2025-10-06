@@ -26,8 +26,30 @@ can automatically generate predictable CSRF tokens for every outgoing request.
 * **HTTP Listeners**: Transform outgoing and incoming HTTP messages. For 
 example, you can use an external Python script to handle custom encryption.
 
+## Testing
+
+Piper includes comprehensive integration tests to ensure reliability and facilitate safe refactoring:
+
+### Baseline Integration Tests
+- **Location**: `src/test/kotlin/burp/BaselineTests.kt`
+- **Purpose**: Validates core functionality against the legacy Burp Extender API
+- **Framework**: JUnit 5 with Mockito for mocking Burp API components
+- **Coverage**: Extension initialization, message viewer registration, HTTP listener setup, and configuration loading
+
+### Running Tests
+```bash
+./gradlew test
+```
+
+### Test Requirements
+- Java 8+ compatibility maintained for Burp Suite integration
+- Gradle 8.14+ for modern build tooling
+- All tests designed to pass against unmodified legacy codebase
+
+The baseline tests serve as a safety net during API migrations and ensure existing behavior is preserved.
+
 Detailed usage information is provided in the original [GWAPT Gold 
-Paper](https://www.sans.org/white-papers/39440/), and in [this demonstration 
+Paper](https://www.sans.org/white-papers/39440/), and in [this demonstration
 video](https://vimeo.com/401007109).
 
 Building
