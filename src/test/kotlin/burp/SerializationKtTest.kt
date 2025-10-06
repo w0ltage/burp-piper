@@ -1,7 +1,7 @@
 package burp
 
-import org.testng.Assert.*
-import org.testng.annotations.Test
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assertions.*
 import kotlin.text.Charsets.UTF_8
 
 val testInput = "ABCDEFGHIJKLMNO".toByteArray(UTF_8)
@@ -13,13 +13,13 @@ class SerializationKtTest {
         for (len in 0.rangeTo(testInput.size)) {
             val subset = testInput.copyOfRange(0, len)
             val padded = pad4(subset)
-            assertEquals(padded.size % 4, 0)
-            assertEquals(subset, unpad4(padded))
+            assertEquals(0, padded.size % 4)
+            assertArrayEquals(subset, unpad4(padded))
         }
     }
 
     @Test
     fun testCompress() {
-        assertEquals(testInput, decompress(compress(testInput)))
+        assertArrayEquals(testInput, decompress(compress(testInput)))
     }
 }
