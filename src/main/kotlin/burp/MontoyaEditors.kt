@@ -1,21 +1,3 @@
-/*
- * This file is part of Piper for Burp Suite (https://github.com/silentsignal/burp-piper)
- * Copyright (c) 2018 Andras Veres-Szentkiralyi
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
- */
-
 package burp
 
 import burp.api.montoya.MontoyaApi
@@ -30,7 +12,9 @@ import burp.api.montoya.utilities.Utilities
 import com.redpois0n.terminal.JTerminal
 import java.awt.Component
 import java.io.File
-import javax.swing.*
+import javax.swing.JScrollPane
+import javax.swing.JTextArea
+import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
 
 /**
@@ -48,8 +32,6 @@ abstract class MontoyaEditor(
     abstract fun getUiComponent(): Component
     abstract fun setRequestResponse(content: MontoyaByteArray?)
     abstract fun isEnabled(content: MontoyaByteArray?): Boolean
-    abstract fun getSelectedData(): MontoyaByteArray?
-    abstract fun caption(): String
 
     /** Set request response content (concrete implementation for subclasses) */
     open fun setRequestResponseContent(content: MontoyaByteArray?) {
@@ -63,52 +45,49 @@ abstract class MontoyaEditor(
         val messageInfo =
                 MessageInfo(
                         content = inputBytes,
-                        text = utilities.bytesToString(content).toString(),
+                        text = utilities.bytesToString(content.bytes),
                         headers = extractHeaders(inputBytes),
                         url = null
                 )
 
-        if (messageViewer.common.hasFilter() &&
-                        !messageViewer.common.filter.matches(messageInfo, utilities, montoyaApi)
-        ) {
-            return null
-        }
-
-        return try {
-            val executionResult = messageViewer.common.cmd.execute(inputBytes)
-            getStdoutWithErrorHandling(executionResult, messageViewer.common)
-        } catch (e: Exception) {
-            montoyaApi
-                    .logging()
-                    .logToError(
-                            "Error processing message in ${messageViewer.common.name}: ${e.message}"
-                    )
-            null
-        }
-    }
-
-    private fun extractHeaders(bytes: ByteArray): List<String>? {
-        return try {
-            val content = String(bytes)
-            val headerEndIndex = content.indexOf("\r\n\r\n")
-            if (headerEndIndex == -1) return null
-
-            content.substring(0, headerEndIndex).split("\r\n")
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun getStdoutWithErrorHandling(
-            executionResult: Pair<Process, List<File>>,
-            tool: Piper.MinimalTool
-    ): ByteArray {
-        return executionResult.processOutput { process ->
-            val stderr = process.errorStream.readBytes()
-            if (stderr.isNotEmpty()) {
-                montoyaApi.logging().logToError("${tool.name} stderr: ${String(stderr)}")
+        return if (messageViewer.common.filter.matches(messageInfo, utilities, montoyaApi)) {
+            try {
+                val executionResult = messageViewer.common.cmd.execute(inputBytes)
+                executionResult.processOutput { process ->
+                    val stderr = process.errorStream.readBytes()
+                    if (stderr.isNotEmpty()) {
+                        montoyaApi
+                                .logging()
+                                .logToError(
+                                        "${messageViewer.common.name} stderr: ${String(stderr)}"
+                                )
+                    }
+                    process.inputStream.readBytes()
+                }
+            } catch (e: Exception) {
+                montoyaApi
+                        .logging()
+                        .logToError(
+                                "Error processing message with ${messageViewer.common.name}: ${e.message}"
+                        )
+                inputBytes
             }
-            process.inputStream.readBytes()
+        } else {
+            inputBytes
+        }
+    }
+
+    private fun extractHeaders(content: ByteArray): List<String>? {
+        return try {
+            val contentString = String(content)
+            val headerEndIndex = contentString.indexOf("\r\n\r\n")
+            if (headerEndIndex == -1) {
+                listOf(contentString.trim())
+            } else {
+                contentString.substring(0, headerEndIndex).split("\r\n")
+            }
+        } catch (e: Exception) {
+            null
         }
     }
 }
@@ -138,17 +117,25 @@ class MontoyaTextEditor(
 
     override fun isModified(): Boolean = false
 
+    override fun getRequest(): burp.api.montoya.http.message.requests.HttpRequest? {
+        return null // Text editor doesn't modify requests
+    }
+
+    override fun getResponse(): burp.api.montoya.http.message.responses.HttpResponse? {
+        return null // Text editor doesn't modify responses
+    }
+
     override fun setRequestResponse(requestResponse: HttpRequestResponse?) {
         // Implementation for HttpRequestResponse interface
         if (requestResponse != null) {
             val request = requestResponse.request()
-            setRequestResponseContent(request.toByteArray())
+            setRequestResponseContent(utilities.byteArrayToByteArray(request.toByteArray().bytes))
         } else {
             setRequestResponseContent(null as MontoyaByteArray?)
         }
     }
 
-    override fun setRequestResponseContent(content: MontoyaByteArray?) {
+    override fun setRequestResponse(content: MontoyaByteArray?) {
         currentMessage = content
         isModified = false
 
@@ -164,7 +151,7 @@ class MontoyaTextEditor(
                     if (processedContent != null) {
                         textArea.text = String(processedContent)
                     } else {
-                        textArea.text = utilities.bytesToString(content).toString()
+                        textArea.text = utilities.bytesToString(content.bytes)
                     }
                 }
             } catch (e: Exception) {
@@ -181,7 +168,7 @@ class MontoyaTextEditor(
         val messageInfo =
                 MessageInfo(
                         content = content.bytes,
-                        text = utilities.bytesToString(content).toString(),
+                        text = utilities.bytesToString(content.bytes),
                         headers = null,
                         url = null
                 )
@@ -189,7 +176,7 @@ class MontoyaTextEditor(
         return messageViewer.common.filter.matches(messageInfo, utilities, montoyaApi)
     }
 
-    override fun getSelectedData(): MontoyaByteArray? {
+    fun getSelectedData(): MontoyaByteArray? {
         val selectedText = textArea.selectedText
         return if (selectedText != null) {
             utilities.byteArrayToByteArray(selectedText.toByteArray())
@@ -201,6 +188,11 @@ class MontoyaTextEditor(
     override fun isEnabledFor(requestResponse: HttpRequestResponse?): Boolean {
         return requestResponse != null
     }
+
+    override fun selectedData(): Selection? {
+        return null // No selection support for text editor
+    }
+}
 
 /**
  * Terminal-based editor for Montoya API with color support. Implements both request and response
@@ -217,21 +209,6 @@ class MontoyaTerminalEditor(
 
     private val terminal = JTerminal()
     private val scrollPane = JScrollPane(terminal)
-    private val outputBuilder = StringBuilder()
-
-    override fun uiComponent(): Component = scrollPane
-
-    override fun isModified(): Boolean = false
-
-    override fun setRequestResponse(requestResponse: HttpRequestResponse?) {
-        // Implementation for HttpRequestResponse interface
-        if (requestResponse != null) {
-            val request = requestResponse.request()
-            setRequestResponseContent(request.toByteArray())
-        } else {
-            setRequestResponseContent(null as MontoyaByteArray?)
-        }
-    }
 
     init {
         terminal.isEditable = false
@@ -239,6 +216,28 @@ class MontoyaTerminalEditor(
     }
 
     override fun getUiComponent(): Component = scrollPane
+
+    override fun uiComponent(): Component = scrollPane
+
+    override fun isModified(): Boolean = false
+
+    override fun getRequest(): burp.api.montoya.http.message.requests.HttpRequest? {
+        return null // Terminal editor doesn't modify requests
+    }
+
+    override fun getResponse(): burp.api.montoya.http.message.responses.HttpResponse? {
+        return null // Terminal editor doesn't modify responses
+    }
+
+    override fun setRequestResponse(requestResponse: HttpRequestResponse?) {
+        // Implementation for HttpRequestResponse interface
+        if (requestResponse != null) {
+            val request = requestResponse.request()
+            setRequestResponseContent(utilities.byteArrayToByteArray(request.toByteArray().bytes))
+        } else {
+            setRequestResponseContent(null as MontoyaByteArray?)
+        }
+    }
 
     override fun setRequestResponse(content: MontoyaByteArray?) {
         currentMessage = content
@@ -257,7 +256,7 @@ class MontoyaTerminalEditor(
                     if (processedContent != null) {
                         terminal.append(String(processedContent))
                     } else {
-                        terminal.append(utilities.bytesToString(content).toString())
+                        terminal.append(utilities.bytesToString(content.bytes))
                     }
                 }
             } catch (e: Exception) {
@@ -277,7 +276,7 @@ class MontoyaTerminalEditor(
         val messageInfo =
                 MessageInfo(
                         content = content.bytes,
-                        text = utilities.bytesToString(content).toString(),
+                        text = utilities.bytesToString(content.bytes),
                         headers = null,
                         url = null
                 )
@@ -285,7 +284,7 @@ class MontoyaTerminalEditor(
         return messageViewer.common.filter.matches(messageInfo, utilities, montoyaApi)
     }
 
-    override fun getSelectedData(): MontoyaByteArray? {
+    fun getSelectedData(): MontoyaByteArray? {
         val selectedText = terminal.selectedText
         return if (selectedText != null) {
             utilities.byteArrayToByteArray(selectedText.toByteArray())
@@ -317,18 +316,6 @@ class MontoyaPayloadGenerator(
             val executionResult = tool.cmd.execute(input)
             val output = getStdoutWithErrorHandling(executionResult, tool)
             GeneratedPayload.payload(utilities.byteArrayToByteArray(output))
-        } catch (e: Exception) {
-            montoyaApi.logging().logToError("Error generating payload with ${tool.name}: ${e.message}")
-            null
-        }
-    }
-
-    fun generateNextPayload(baseValue: MontoyaByteArray): MontoyaByteArray? {
-        return try {
-            val input = baseValue.bytes
-            val executionResult = tool.cmd.execute(input)
-            val output = getStdoutWithErrorHandling(executionResult, tool)
-            utilities.byteArrayToByteArray(output)
         } catch (e: Exception) {
             montoyaApi
                     .logging()

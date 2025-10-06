@@ -1470,9 +1470,8 @@ class RegExpWidget(regex: Piper.RegularExpression, panel: Container, cs: GridBag
     fun toRegularExpression(): Piper.RegularExpression {
         return Piper.RegularExpression.newBuilder()
                 .setPattern(tfPattern.text)
-                .setFlagSet(esw.toSet())
+                .setFlags(esw.toSet().compile())
                 .build()
-                .apply { compile() }
     }
 }
 

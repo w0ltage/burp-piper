@@ -35,6 +35,7 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
             override fun host(): String = host
             override fun port(): Int = port
             override fun secure(): Boolean = secure
+            override fun ipAddress(): String = host
         }
 
         // Create immutable snapshots of the original data
@@ -48,6 +49,12 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
         override fun response(): HttpResponse = response
         override fun annotations(): Annotations = annotations
 
+        override fun url(): String = request.url()
+        override fun hasResponse(): Boolean = response != null
+        override fun contentType(): burp.api.montoya.http.message.ContentType =
+                request.contentType()
+        override fun statusCode(): Short = response?.statusCode() ?: 0
+
         override fun withAnnotations(annotations: Annotations): HttpRequestResponse {
             // Return a new instance with updated annotations (immutable pattern)
             return object : HttpRequestResponse {
@@ -56,10 +63,21 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
                 override fun request(): HttpRequest = this@QueuedHttpRequestResponse.request()
                 override fun response(): HttpResponse = this@QueuedHttpRequestResponse.response()
                 override fun annotations(): Annotations = annotations
+                override fun url(): String = this@QueuedHttpRequestResponse.url()
+                override fun hasResponse(): Boolean = this@QueuedHttpRequestResponse.hasResponse()
+                override fun contentType(): burp.api.montoya.http.message.ContentType =
+                        this@QueuedHttpRequestResponse.contentType()
+                override fun statusCode(): Short = this@QueuedHttpRequestResponse.statusCode()
+                override fun timingData():
+                        java.util.Optional<burp.api.montoya.http.message.TimingData> =
+                        java.util.Optional.empty()
                 override fun withAnnotations(annotations: Annotations): HttpRequestResponse =
                         this@QueuedHttpRequestResponse.withAnnotations(annotations)
             }
         }
+
+        override fun timingData(): java.util.Optional<burp.api.montoya.http.message.TimingData> =
+                java.util.Optional.empty()
 
         override fun toString(): String = toHumanReadable(this)
     }
@@ -111,8 +129,8 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
                     addActionListener {
                         val selectedIndices = listWidget.selectedIndices.sortedDescending()
                         for (index in selectedIndices) {
-                            if (index >= 0 && index < model.size()) {
-                                model.removeElementAt(index)
+                            if (index >= 0 && index < this@Queue.model.size()) {
+                                this@Queue.model.removeElementAt(index)
                             }
                         }
                     }
@@ -156,7 +174,7 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
         val config = configModel.config
 
         // Add minimal tools
-        val enabledMinimalTools = config.minimalToolList.filter { it.enabled }
+        val enabledMinimalTools = configModel.macrosModel.toIterable().filter { it.enabled }
         if (enabledMinimalTools.isNotEmpty()) {
             enabledMinimalTools.forEach { tool ->
                 val menuItem =
@@ -168,15 +186,16 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
         }
 
         // Add user action tools if any
-        val enabledUserActionTools = config.userActionToolList.filter { it.enabled }
+        val enabledUserActionTools =
+                configModel.userActionToolsModel.toIterable().filter { it.enabled }
         if (enabledUserActionTools.isNotEmpty()) {
             if (enabledMinimalTools.isNotEmpty()) {
                 popupMenu.addSeparator()
             }
             enabledUserActionTools.forEach { tool ->
                 val menuItem =
-                        JMenuItem(tool.name).apply {
-                            addActionListener {
+                        JMenuItem(tool.common.name).apply {
+                            addActionListener { _ ->
                                 processItemsWithUserActionTool(selectedItems, tool)
                             }
                         }
@@ -270,7 +289,7 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
     }
 
     /** Get current queue size */
-    fun size(): Int = model.size()
+    fun queueSize(): Int = model.size()
 
     /** Check if queue is empty */
     fun isEmpty(): Boolean = model.isEmpty

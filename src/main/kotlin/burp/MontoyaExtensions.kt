@@ -66,7 +66,7 @@ fun Piper.HeaderMatch.toHumanReadable(negation: Boolean): String =
 
 fun Piper.RegularExpression.toHumanReadable(negation: Boolean): String {
     val prefix = if (negation) "doesn't match" else "matches"
-    return "$prefix /${pattern}/${flagsValue.toHumanReadable()}"
+    return "$prefix /${pattern}/${flags.toHumanReadable()}"
 }
 
 fun Piper.CommandInvocation.toHumanReadable(negation: Boolean): String {
@@ -92,6 +92,16 @@ fun Utilities.bytesToString(bytes: ByteArray): String {
     return String(bytes, Charsets.UTF_8)
 }
 
+/** Convert kotlin.ByteArray to Montoya ByteArray */
+fun Utilities.byteArrayToByteArray(bytes: ByteArray): burp.api.montoya.core.ByteArray {
+    return burp.api.montoya.core.ByteArray.byteArray(*bytes)
+}
+
+/** Convert Montoya ByteArray to kotlin.ByteArray */
+fun burp.api.montoya.core.ByteArray.toByteArray(): ByteArray {
+    return this.bytes
+}
+
 /** Get command line representation of CommandInvocation */
 val Piper.CommandInvocation.commandLine: String
     get() =
@@ -115,7 +125,7 @@ const val CMDLINE_INPUT_FILENAME_PLACEHOLDER = "<INPUT>"
 
 fun Int.toHumanReadable(): String =
         sequence {
-            RegExpFlag.values().filter { it.ordinal != 0 && hasFlag(it.id) }.forEach {
+            RegExpFlag.values().filter { it.ordinal != 0 && hasFlag(it.value) }.forEach {
                 yield(it.name.toLowerCase())
             }
         }
@@ -142,29 +152,36 @@ fun Piper.MessageMatch.matches(
         utilities: Utilities,
         montoyaApi: MontoyaApi
 ): Boolean {
-    if (hasPrefix() && !msg.payloadString.startsWith(prefix.toString(Charsets.UTF_8)))
+    if (this.prefix != null &&
+                    this.prefix.size() > 0 &&
+                    !msg.text.startsWith(prefix.toString(Charsets.UTF_8))
+    )
             return false.logicalXor(negation)
-    if (hasPostfix() && !msg.payloadString.endsWith(postfix.toString(Charsets.UTF_8)))
+    if (this.postfix != null &&
+                    this.postfix.size() > 0 &&
+                    !msg.text.endsWith(postfix.toString(Charsets.UTF_8))
+    )
             return false.logicalXor(negation)
 
     if (hasRegex()) {
-        val pattern = Pattern.compile(regex.pattern, regex.flagsValue)
-        if (!pattern.matcher(msg.payloadString).find()) return false.logicalXor(negation)
+        val pattern = Pattern.compile(regex.pattern, regex.flags)
+        if (!pattern.matcher(msg.text).find()) return false.logicalXor(negation)
     }
 
     if (hasHeader()) {
-        val pattern = Pattern.compile(header.regex.pattern, header.regex.flagsValue)
+        val pattern = Pattern.compile(header.regex.pattern, header.regex.flags)
         val matches =
                 msg.headers
-                        .asSequence()
-                        .filter { it.toLowerCase().startsWith(header.header.toLowerCase()) }
-                        .map { it.substring(header.header.length).trimStart(':').trim() }
-                        .any { pattern.matcher(it).find() }
+                        ?.asSequence()
+                        ?.filter { it.toLowerCase().startsWith(header.header.toLowerCase()) }
+                        ?.map { it.substring(header.header.length).trimStart(':').trim() }
+                        ?.any { pattern.matcher(it).find() }
+                        ?: false
         if (!matches) return false.logicalXor(negation)
     }
 
     if (hasCmd()) {
-        if (!cmd.matches(msg.payload, utilities, montoyaApi)) return false.logicalXor(negation)
+        if (!cmd.matches(msg.content, utilities, montoyaApi)) return false.logicalXor(negation)
     }
 
     if (inScope) {
@@ -184,8 +201,8 @@ fun Piper.MessageMatch.matches(
 
 /** Check if message match has filter */
 fun Piper.MessageMatch.hasFilter(): Boolean {
-    return this.hasPrefix() ||
-            this.hasPostfix() ||
+    return (this.prefix != null && this.prefix.size() > 0) ||
+            (this.postfix != null && this.postfix.size() > 0) ||
             this.hasRegex() ||
             this.hasHeader() ||
             this.hasCmd()
@@ -209,31 +226,31 @@ fun Piper.CommandInvocation.matches(
         tmpFiles.forEach { it.delete() }
 
         return when {
-            hasStdoutFilter() ->
-                    stdoutFilter.matches(
+            hasStdout() ->
+                    this.stdout.matches(
                             MessageInfo(
-                                    stdout,
-                                    utilities.byteUtils().convertToString(stdout),
-                                    emptyList(),
-                                    null
+                                    content = stdout,
+                                    text = utilities.bytesToString(stdout),
+                                    headers = emptyList(),
+                                    url = null
                             ),
                             utilities,
                             montoyaApi
                     )
-            hasStderrFilter() -> {
+            hasStderr() -> {
                 val stderr = process.errorStream.readBytes()
-                stderrFilter.matches(
+                this.stderr.matches(
                         MessageInfo(
-                                stderr,
-                                utilities.byteUtils().convertToString(stderr),
-                                emptyList(),
-                                null
+                                content = stderr,
+                                text = utilities.bytesToString(stderr),
+                                headers = emptyList(),
+                                url = null
                         ),
                         utilities,
                         montoyaApi
                 )
             }
-            else -> successfulExitCodesList.contains(process.waitFor())
+            else -> exitCodeList.contains(process.waitFor())
         }
     } catch (e: DependencyException) {
         return false
@@ -251,7 +268,7 @@ fun Piper.CommandInvocation.execute(vararg inputs: ByteArray): Pair<Process, Lis
     val cmdLine = commandLine().toMutableList()
 
     inputs.forEachIndexed { idx, input ->
-        when (inputMethod) {
+        when (this.inputMethod) {
             Piper.CommandInvocation.InputMethod.STDIN -> {
                 // Will be handled after process creation
             }
@@ -260,6 +277,9 @@ fun Piper.CommandInvocation.execute(vararg inputs: ByteArray): Pair<Process, Lis
                 tmpFile.writeBytes(input)
                 tmpFiles.add(tmpFile)
                 cmdLine.add(tmpFile.absolutePath)
+            }
+            Piper.CommandInvocation.InputMethod.UNRECOGNIZED -> {
+                // Default to STDIN for unrecognized method
             }
         }
     }
@@ -354,23 +374,15 @@ fun <E : Enum<E>> calcEnumSet(
 fun Int.toToolSet(): Set<ToolType> =
         calcEnumSet(ToolType::class.java, ToolType::toolFlag, this, emptySet())
 
-fun Piper.MinimalTool.isInToolScope(isRequest: Boolean): Boolean {
-    val tools = toolFlagsValue.toToolSet()
-    if (tools.isEmpty()) return true
-
-    return when (toolScope) {
-        Piper.ConfigMinimalToolScope.ALL_TOOLS -> true
-        Piper.ConfigMinimalToolScope.CUSTOM_TOOLS -> tools.isNotEmpty()
-        else -> true
-    }
-}
+fun Piper.MinimalTool.isInToolScope(isRequest: Boolean): Boolean =
+        when (scope) {
+            Piper.MinimalTool.Scope.REQUEST_ONLY -> isRequest
+            Piper.MinimalTool.Scope.RESPONSE_ONLY -> !isRequest
+            else -> true
+        }
 
 fun Piper.HttpListener.isInToolScope(toolType: ToolType): Boolean {
-    return when (toolScope) {
-        Piper.ConfigHttpListenerScope.ALL_TOOLS -> true
-        Piper.ConfigHttpListenerScope.CUSTOM_TOOLS -> toolFlagsValue.toToolSet().contains(toolType)
-        else -> true
-    }
+    return tool.toToolSet().contains(toolType)
 }
 
 ////////////////////////////////////// Request/Response utilities

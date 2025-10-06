@@ -117,8 +117,18 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                             actionData: SessionHandlingActionData
                     ): burp.api.montoya.http.sessions.ActionResult {
                         return try {
-                            val result = modelItem.execute(utilities)
-                            val newRequest = HttpRequest.httpRequestFromUrl(result)
+                            val requestBytes = actionData.request().toByteArray().toByteArray()
+                            val (process, tempFiles) = modelItem.cmd.execute(requestBytes)
+                            val result = process.inputStream.readBytes()
+                            tempFiles.forEach { it.delete() }
+
+                            val resultString = String(result)
+                            val newRequest =
+                                    if (resultString.isNotBlank()) {
+                                        HttpRequest.httpRequest(resultString)
+                                    } else {
+                                        actionData.request()
+                                    }
                             burp.api.montoya.http.sessions.ActionResult.actionResult(newRequest)
                         } catch (e: Exception) {
                             montoyaApi.logging().logToError("Macro execution failed: ${e.message}")
@@ -224,10 +234,13 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                 object : PayloadProcessor {
                     override fun processPayload(payloadData: PayloadData): PayloadProcessingResult {
                         return try {
-                            val currentPayload = String(payloadData.currentPayload().bytes)
-                            val result = modelItem.execute(utilities)
+                            val payloadBytes = payloadData.currentPayload().bytes
+                            val (process, tempFiles) = modelItem.cmd.execute(payloadBytes)
+                            val result = process.inputStream.readBytes()
+                            tempFiles.forEach { it.delete() }
+
                             PayloadProcessingResult.usePayload(
-                                    burp.api.montoya.core.ByteArray.byteArray(*result.toByteArray())
+                                    burp.api.montoya.core.ByteArray.byteArray(*result)
                             )
                         } catch (e: Exception) {
                             montoyaApi
@@ -438,9 +451,7 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                             !this.filter.matches(
                                     MessageInfo(
                                             lastBody,
-                                            utilities
-                                                    .bytesToString(lastBody.toByteArray())
-                                                    .toString(),
+                                            utilities.bytesToString(lastBody).toString(),
                                             headers,
                                             try {
                                                 getUrlFromMessage(messageInfo)
@@ -650,7 +661,7 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
             val configData =
                     montoyaApi.persistence().extensionData().getString(EXTENSION_SETTINGS_KEY)
             if (configData != null) {
-                parseConfig(configData.toByteArray())
+                parseConfig(configData)
             } else {
                 configModel.initializeFromDefaults()
                 configModel.config

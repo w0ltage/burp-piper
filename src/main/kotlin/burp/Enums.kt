@@ -80,7 +80,15 @@ enum class BurpTool {
     DECODER,
     COMPARER,
     EXTENDER,
-    ORGANIZER
+    ORGANIZER;
+
+    /** Get integer value for tool (power of 2 for bitmasking) */
+    val value: Int
+        get() = 1 shl ordinal
+
+    override fun toString(): String {
+        return name.lowercase().replaceFirstChar { it.uppercase() }
+    }
 }
 
 /** Highlight colors for marking messages. Maps to Montoya API HighlightColor values. */
