@@ -562,7 +562,7 @@ abstract class MinimalToolDialog<E>(
     fun isToolEnabled(): Boolean = common.enabled
     fun toHumanReadable(): String = minimalToolHumanReadableName(common)
 
-    abstract fun buildEnabled(value: Boolean) : E
+    abstract fun buildEnabled(value: Boolean): E
     abstract fun processGUI(mt: Piper.MinimalTool): E
 
     protected fun addFilterChangeListener(listener: ChangeListener<Piper.MessageMatch>) {
@@ -594,7 +594,8 @@ class MessageViewerDialog(private val messageViewer: Piper.MessageViewer, parent
                     }
                     .build()
 
-    override fun buildEnabled(value: Boolean): Piper.MessageViewer = messageViewer.buildEnabled(value)
+    override fun buildEnabled(value: Boolean): Piper.MessageViewer =
+            messageViewer.buildEnabled(value)
 }
 
 const val HTTP_LISTENER_NOTE =
@@ -1333,7 +1334,7 @@ private class InputMethodWidget(
                                     .toIterable()
                                     .indexOfFirst(CommandLineParameter::isInputFileName)
                     if (iof >= 0)
-                            paramsModel.remove(
+                            paramsModel.removeElementAt(
                                     iof
                             ) // this triggers intervalRemoved above, no explicit update() necessary
                 } else {

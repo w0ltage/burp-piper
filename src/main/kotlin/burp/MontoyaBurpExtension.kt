@@ -593,7 +593,7 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
     private fun createDeveloperUI(cfg: ConfigModel): Component =
             JCheckBox("show user interface elements suited for developers").apply {
                 isSelected = cfg.developer
-                cfg.addPropertyChangeListener({ isSelected = cfg.developer })
+                cfg.addPropertyChangeListener { isSelected = cfg.developer }
                 addChangeListener { cfg.developer = isSelected }
             }
 
@@ -611,7 +611,7 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
     ): Boolean {
         return when (toolSource.toolType()) {
             burp.api.montoya.core.ToolType.PROXY -> (toolFlag and 1) != 0
-            burp.api.montoya.core.ToolType.SPIDER -> (toolFlag and 2) != 0
+            burp.api.montoya.core.ToolType.TARGET -> (toolFlag and 2) != 0
             burp.api.montoya.core.ToolType.SCANNER -> (toolFlag and 4) != 0
             burp.api.montoya.core.ToolType.INTRUDER -> (toolFlag and 8) != 0
             burp.api.montoya.core.ToolType.REPEATER -> (toolFlag and 16) != 0
@@ -652,11 +652,13 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
             if (configData != null) {
                 parseConfig(configData.toByteArray())
             } else {
-                loadDefaultConfig()
+                configModel.initializeFromDefaults()
+                configModel.config
             }
         } catch (e: Exception) {
             montoyaApi.logging().logToError("Error loading config: ${e.message}")
-            loadDefaultConfig()
+            configModel.initializeFromDefaults()
+            configModel.config
         }
     }
 

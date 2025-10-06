@@ -1,6 +1,8 @@
 package burp
 
 import burp.api.montoya.MontoyaApi
+import java.beans.PropertyChangeListener
+import java.beans.PropertyChangeSupport
 import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -13,6 +15,9 @@ import java.nio.file.Paths
  */
 class ConfigModel(private val montoyaApi: MontoyaApi) {
 
+    /** Property change support for event handling */
+    private val pcs = PropertyChangeSupport(this)
+
     /** Current configuration instance */
     private var _config: Piper.Config = Piper.Config.getDefaultInstance()
 
@@ -22,9 +27,34 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
     /** Whether configuration has been modified */
     private var isDirty: Boolean = false
 
+    /** Developer mode property */
+    private var _developer = _config.developer
+    var developer: Boolean
+        get() = _developer
+        set(value) {
+            val old = _developer
+            _developer = value
+            pcs.firePropertyChange("developer", old, value)
+        }
+
     /** Get current configuration */
     val config: Piper.Config
         get() = _config
+
+    /** Model collections for UI components */
+    val macrosModel = javax.swing.DefaultListModel<Piper.MinimalTool>()
+    val messageViewersModel = javax.swing.DefaultListModel<Piper.MessageViewer>()
+    val userActionToolsModel = javax.swing.DefaultListModel<Piper.UserActionTool>()
+    val httpListenersModel = javax.swing.DefaultListModel<Piper.HttpListener>()
+    val commentatorsModel = javax.swing.DefaultListModel<Piper.Commentator>()
+    val intruderPayloadProcessorsModel = javax.swing.DefaultListModel<Piper.MinimalTool>()
+    val highlightersModel = javax.swing.DefaultListModel<Piper.Highlighter>()
+    val intruderPayloadGeneratorsModel = javax.swing.DefaultListModel<Piper.MinimalTool>()
+
+    /** Add property change listener */
+    fun addPropertyChangeListener(listener: PropertyChangeListener) {
+        pcs.addPropertyChangeListener(listener)
+    }
 
     /** Initialize configuration from default YAML resources */
     fun initializeFromDefaults() {

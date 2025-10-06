@@ -20,6 +20,10 @@ package burp
 
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.core.ByteArray as MontoyaByteArray
+import burp.api.montoya.http.message.HttpRequestResponse
+import burp.api.montoya.intruder.GeneratedPayload
+import burp.api.montoya.intruder.IntruderInsertionPoint
+import burp.api.montoya.ui.Selection
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpRequestEditor
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpResponseEditor
 import burp.api.montoya.utilities.Utilities
@@ -46,6 +50,11 @@ abstract class MontoyaEditor(
     abstract fun isEnabled(content: MontoyaByteArray?): Boolean
     abstract fun getSelectedData(): MontoyaByteArray?
     abstract fun caption(): String
+
+    /** Set request response content (concrete implementation for subclasses) */
+    open fun setRequestResponseContent(content: MontoyaByteArray?) {
+        setRequestResponse(content)
+    }
 
     protected fun processMessage(content: MontoyaByteArray?): ByteArray? {
         if (content == null) return null
@@ -125,7 +134,21 @@ class MontoyaTextEditor(
 
     override fun getUiComponent(): Component = scrollPane
 
-    override fun setRequestResponse(content: MontoyaByteArray?) {
+    override fun uiComponent(): Component = scrollPane
+
+    override fun isModified(): Boolean = false
+
+    override fun setRequestResponse(requestResponse: HttpRequestResponse?) {
+        // Implementation for HttpRequestResponse interface
+        if (requestResponse != null) {
+            val request = requestResponse.request()
+            setRequestResponseContent(request.toByteArray())
+        } else {
+            setRequestResponseContent(null as MontoyaByteArray?)
+        }
+    }
+
+    override fun setRequestResponseContent(content: MontoyaByteArray?) {
         currentMessage = content
         isModified = false
 
@@ -174,7 +197,10 @@ class MontoyaTextEditor(
     }
 
     override fun caption(): String = messageViewer.common.name
-}
+
+    override fun isEnabledFor(requestResponse: HttpRequestResponse?): Boolean {
+        return requestResponse != null
+    }
 
 /**
  * Terminal-based editor for Montoya API with color support. Implements both request and response
@@ -191,6 +217,21 @@ class MontoyaTerminalEditor(
 
     private val terminal = JTerminal()
     private val scrollPane = JScrollPane(terminal)
+    private val outputBuilder = StringBuilder()
+
+    override fun uiComponent(): Component = scrollPane
+
+    override fun isModified(): Boolean = false
+
+    override fun setRequestResponse(requestResponse: HttpRequestResponse?) {
+        // Implementation for HttpRequestResponse interface
+        if (requestResponse != null) {
+            val request = requestResponse.request()
+            setRequestResponseContent(request.toByteArray())
+        } else {
+            setRequestResponseContent(null as MontoyaByteArray?)
+        }
+    }
 
     init {
         terminal.isEditable = false
@@ -204,7 +245,7 @@ class MontoyaTerminalEditor(
         isModified = false
 
         if (content == null) {
-            terminal.clear()
+            terminal.text = ""
             return
         }
 
@@ -212,7 +253,7 @@ class MontoyaTerminalEditor(
             try {
                 val processedContent = processMessage(content)
                 SwingUtilities.invokeLater {
-                    terminal.clear()
+                    terminal.text = ""
                     if (processedContent != null) {
                         terminal.append(String(processedContent))
                     } else {
@@ -221,7 +262,7 @@ class MontoyaTerminalEditor(
                 }
             } catch (e: Exception) {
                 SwingUtilities.invokeLater {
-                    terminal.clear()
+                    terminal.text = ""
                     terminal.append("Error: ${e.message}")
                 }
             }
@@ -252,6 +293,14 @@ class MontoyaTerminalEditor(
     }
 
     override fun caption(): String = messageViewer.common.name
+
+    override fun isEnabledFor(requestResponse: HttpRequestResponse?): Boolean {
+        return requestResponse != null
+    }
+
+    override fun selectedData(): Selection? {
+        return null // No selection support for terminal editor
+    }
 }
 
 /** Payload generator for Montoya API Intruder integration. */
@@ -261,7 +310,20 @@ class MontoyaPayloadGenerator(
         private val montoyaApi: MontoyaApi
 ) : burp.api.montoya.intruder.PayloadGenerator {
 
-    override fun generateNextPayload(baseValue: MontoyaByteArray): MontoyaByteArray? {
+    override fun generatePayloadFor(insertionPoint: IntruderInsertionPoint): GeneratedPayload? {
+        return try {
+            val baseValue = insertionPoint.baseValue()
+            val input = baseValue.bytes
+            val executionResult = tool.cmd.execute(input)
+            val output = getStdoutWithErrorHandling(executionResult, tool)
+            GeneratedPayload.payload(utilities.byteArrayToByteArray(output))
+        } catch (e: Exception) {
+            montoyaApi.logging().logToError("Error generating payload with ${tool.name}: ${e.message}")
+            null
+        }
+    }
+
+    fun generateNextPayload(baseValue: MontoyaByteArray): MontoyaByteArray? {
         return try {
             val input = baseValue.bytes
             val executionResult = tool.cmd.execute(input)
