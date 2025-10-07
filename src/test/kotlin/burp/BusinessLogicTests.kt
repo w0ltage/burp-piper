@@ -27,12 +27,10 @@ class BusinessLogicTests {
             val yamlConfig =
                     """
                 messageViewers:
-                - common:
-                    name: Test Message Viewer
-                    enabled: true
-                    cmd:
-                      prefix: [echo]
-                      inputMethod: stdin
+                - name: Test Message Viewer
+                  enabled: true
+                  prefix: [echo]
+                  inputMethod: stdin
             """.trimIndent()
 
             // Act
@@ -43,7 +41,7 @@ class BusinessLogicTests {
             val viewer = config.messageViewerList[0]
             assertEquals("Test Message Viewer", viewer.common.name)
             assertTrue(viewer.common.enabled)
-            assertEquals(1, viewer.common.cmd.prefixCount)
+            assertEquals(1, viewer.common.cmd.prefixList.size)
             assertEquals("echo", viewer.common.cmd.prefixList[0])
         }
 
@@ -54,12 +52,10 @@ class BusinessLogicTests {
             val yamlConfig =
                     """
                 macros:
-                - common:
-                    name: Test Macro
-                    enabled: false
-                    cmd:
-                      prefix: [curl, -X, POST]
-                      inputMethod: filename
+                - name: Test Macro
+                  enabled: false
+                  prefix: [curl, -X, POST]
+                  inputMethod: filename
             """.trimIndent()
 
             // Act
@@ -68,12 +64,12 @@ class BusinessLogicTests {
             // Assert
             assertEquals(1, config.macroCount)
             val macro = config.macroList[0]
-            assertEquals("Test Macro", macro.common.name)
-            assertFalse(macro.common.enabled)
-            assertEquals(3, macro.common.cmd.prefixCount)
-            assertEquals("curl", macro.common.cmd.prefixList[0])
-            assertEquals("-X", macro.common.cmd.prefixList[1])
-            assertEquals("POST", macro.common.cmd.prefixList[2])
+            assertEquals("Test Macro", macro.name)
+            assertFalse(macro.enabled)
+            assertEquals(3, macro.cmd.prefixList.size)
+            assertEquals("curl", macro.cmd.prefixList[0])
+            assertEquals("-X", macro.cmd.prefixList[1])
+            assertEquals("POST", macro.cmd.prefixList[2])
         }
 
         @Test
@@ -83,26 +79,21 @@ class BusinessLogicTests {
             val yamlConfig =
                     """
                 messageViewers:
-                - common:
-                    name: Viewer 1
-                    enabled: true
-                    cmd:
-                      prefix: [cat]
-                      inputMethod: stdin
+                - name: Viewer 1
+                  enabled: true
+                  prefix: [cat]
+                  inputMethod: stdin
                 macros:
-                - common:
-                    name: Macro 1
-                    enabled: true
-                    cmd:
-                      prefix: [echo]
-                      inputMethod: stdin
+                - name: Macro 1
+                  enabled: true
+                  prefix: [echo]
+                  inputMethod: stdin
                 httpListeners:
-                - common:
-                    name: Listener 1
-                    enabled: false
-                    cmd:
-                      prefix: [grep, "-i"]
-                      inputMethod: stdin
+                - name: Listener 1
+                  enabled: false
+                  prefix: [grep, "-i"]
+                  inputMethod: stdin
+                  scope: REQUEST
             """.trimIndent()
 
             // Act
@@ -114,7 +105,7 @@ class BusinessLogicTests {
             assertEquals(1, config.httpListenerCount)
 
             assertEquals("Viewer 1", config.messageViewerList[0].common.name)
-            assertEquals("Macro 1", config.macroList[0].common.name)
+            assertEquals("Macro 1", config.macroList[0].name)
             assertEquals("Listener 1", config.httpListenerList[0].common.name)
         }
 
@@ -154,27 +145,21 @@ class BusinessLogicTests {
             // Arrange
             val toolMap =
                     mapOf(
-                            "common" to
-                                    mapOf(
-                                            "name" to "Test Tool",
-                                            "enabled" to true,
-                                            "cmd" to
-                                                    mapOf(
-                                                            "prefix" to listOf("echo", "hello"),
-                                                            "inputMethod" to "stdin"
-                                                    )
-                                    )
+                            "name" to "Test Tool",
+                            "enabled" to true,
+                            "prefix" to listOf("echo", "hello"),
+                            "inputMethod" to "stdin"
                     )
 
             // Act
             val tool = minimalToolFromMap(toolMap)
 
             // Assert
-            assertEquals("Test Tool", tool.common.name)
-            assertTrue(tool.common.enabled)
-            assertEquals(2, tool.common.cmd.prefixCount)
-            assertEquals("echo", tool.common.cmd.prefixList[0])
-            assertEquals("hello", tool.common.cmd.prefixList[1])
+            assertEquals("Test Tool", tool.name)
+            assertTrue(tool.enabled)
+            assertEquals(2, tool.cmd.prefixList.size)
+            assertEquals("echo", tool.cmd.prefixList[0])
+            assertEquals("hello", tool.cmd.prefixList[1])
         }
 
         @Test
@@ -183,49 +168,37 @@ class BusinessLogicTests {
             // Arrange
             val toolMap =
                     mapOf(
-                            "common" to
-                                    mapOf(
-                                            "name" to "Disabled Tool",
-                                            "enabled" to false,
-                                            "cmd" to
-                                                    mapOf(
-                                                            "prefix" to listOf("test"),
-                                                            "inputMethod" to "filename"
-                                                    )
-                                    )
+                            "name" to "Disabled Tool",
+                            "enabled" to false,
+                            "prefix" to listOf("test"),
+                            "inputMethod" to "filename"
                     )
 
             // Act
             val tool = minimalToolFromMap(toolMap)
 
             // Assert
-            assertEquals("Disabled Tool", tool.common.name)
-            assertFalse(tool.common.enabled)
+            assertEquals("Disabled Tool", tool.name)
+            assertFalse(tool.enabled)
         }
 
         @Test
-        @DisplayName("should default enabled to false when not specified")
-        fun `default enabled to false when not specified`() {
+        @DisplayName("should default enabled to true when not specified")
+        fun `default enabled to true when not specified`() {
             // Arrange
             val toolMap =
                     mapOf(
-                            "common" to
-                                    mapOf(
-                                            "name" to "Default Tool",
-                                            "cmd" to
-                                                    mapOf(
-                                                            "prefix" to listOf("test"),
-                                                            "inputMethod" to "stdin"
-                                                    )
-                                    )
+                            "name" to "Default Tool",
+                            "prefix" to listOf("test"),
+                            "inputMethod" to "stdin"
                     )
 
             // Act
             val tool = minimalToolFromMap(toolMap)
 
             // Assert
-            assertEquals("Default Tool", tool.common.name)
-            assertFalse(tool.common.enabled) // Should default to false
+            assertEquals("Default Tool", tool.name)
+            assertTrue(tool.enabled) // Should default to true
         }
     }
 
@@ -239,17 +212,10 @@ class BusinessLogicTests {
             // Arrange
             val highlighterMap =
                     mapOf(
-                            "common" to
-                                    mapOf(
-                                            "name" to "Test Highlighter",
-                                            "enabled" to true,
-                                            "cmd" to
-                                                    mapOf(
-                                                            "prefix" to
-                                                                    listOf("grep", "-i", "error"),
-                                                            "inputMethod" to "stdin"
-                                                    )
-                                    ),
+                            "name" to "Test Highlighter",
+                            "enabled" to true,
+                            "prefix" to listOf("grep", "-i", "error"),
+                            "inputMethod" to "stdin",
                             "color" to "red",
                             "overwrite" to true,
                             "applyWithListener" to false
@@ -272,17 +238,10 @@ class BusinessLogicTests {
             // Arrange
             val commentatorMap =
                     mapOf(
-                            "common" to
-                                    mapOf(
-                                            "name" to "Test Commentator",
-                                            "enabled" to true,
-                                            "cmd" to
-                                                    mapOf(
-                                                            "prefix" to
-                                                                    listOf("awk", "'{print $1}'"),
-                                                            "inputMethod" to "stdin"
-                                                    )
-                                    ),
+                            "name" to "Test Commentator",
+                            "enabled" to true,
+                            "prefix" to listOf("awk", "'{print $1}'"),
+                            "inputMethod" to "stdin",
                             "overwrite" to false,
                             "applyWithListener" to true
                     )
@@ -422,53 +381,42 @@ class BusinessLogicTests {
             val complexYaml =
                     """
                 messageViewers:
-                - common:
-                    name: JSON Pretty Print
-                    enabled: true
-                    cmd:
-                      prefix: [python3, -m, json.tool]
-                      inputMethod: stdin
-                - common:
-                    name: XML Pretty Print
-                    enabled: false
-                    cmd:
-                      prefix: [xmllint, --format, -]
-                      inputMethod: stdin
+                - name: JSON Pretty Print
+                  enabled: true
+                  prefix: [python3, -m, json.tool]
+                  inputMethod: stdin
+                - name: XML Pretty Print
+                  enabled: false
+                  prefix: [xmllint, --format, -]
+                  inputMethod: stdin
 
                 macros:
-                - common:
-                    name: SQL Injection Test
-                    enabled: true
-                    cmd:
-                      prefix: [sqlmap, -r]
-                      inputMethod: filename
+                - name: SQL Injection Test
+                  enabled: true
+                  prefix: [sqlmap, -r]
+                  inputMethod: filename
 
                 httpListeners:
-                - common:
-                    name: Log Requests
-                    enabled: true
-                    cmd:
-                      prefix: [tee, -a, requests.log]
-                      inputMethod: stdin
+                - name: Log Requests
+                  enabled: true
+                  prefix: [tee, -a, requests.log]
+                  inputMethod: stdin
+                  scope: REQUEST
 
                 highlighters:
-                - common:
-                    name: Error Highlighter
-                    enabled: true
-                    cmd:
-                      prefix: [grep, -i, error]
-                      inputMethod: stdin
+                - name: Error Highlighter
+                  enabled: true
+                  prefix: [grep, -i, error]
+                  inputMethod: stdin
                   color: red
                   overwrite: true
                   applyWithListener: false
 
                 commentators:
-                - common:
-                    name: IP Extractor
-                    enabled: true
-                    cmd:
-                      prefix: [grep, -oE, "([0-9]{1,3}\.){3}[0-9]{1,3}"]
-                      inputMethod: stdin
+                - name: IP Extractor
+                  enabled: true
+                  prefix: [grep, -oE, '([0-9]{1,3}\.){3}[0-9]{1,3}']
+                  inputMethod: stdin
                   overwrite: false
                   applyWithListener: true
             """.trimIndent()
@@ -488,12 +436,12 @@ class BusinessLogicTests {
             val jsonViewer = config.messageViewerList[0]
             assertEquals("JSON Pretty Print", jsonViewer.common.name)
             assertTrue(jsonViewer.common.enabled)
-            assertEquals(3, jsonViewer.common.cmd.prefixCount)
+            assertEquals(3, jsonViewer.common.cmd.prefixList.size)
 
             // Verify macro
             val sqlMacro = config.macroList[0]
-            assertEquals("SQL Injection Test", sqlMacro.common.name)
-            assertTrue(sqlMacro.common.enabled)
+            assertEquals("SQL Injection Test", sqlMacro.name)
+            assertTrue(sqlMacro.enabled)
 
             // Verify highlighter
             val errorHighlighter = config.highlighterList[0]
@@ -515,23 +463,17 @@ class BusinessLogicTests {
             val mixedYaml =
                     """
                 messageViewers:
-                - common:
-                    name: Enabled Viewer
-                    enabled: true
-                    cmd:
-                      prefix: [cat]
-                      inputMethod: stdin
-                - common:
-                    name: Disabled Viewer
-                    enabled: false
-                    cmd:
-                      prefix: [head]
-                      inputMethod: stdin
-                - common:
-                    name: Default Viewer
-                    cmd:
-                      prefix: [tail]
-                      inputMethod: stdin
+                - name: Enabled Viewer
+                  enabled: true
+                  prefix: [cat]
+                  inputMethod: stdin
+                - name: Disabled Viewer
+                  enabled: false
+                  prefix: [head]
+                  inputMethod: stdin
+                - name: Default Viewer
+                  prefix: [tail]
+                  inputMethod: stdin
             """.trimIndent()
 
             // Act
@@ -547,7 +489,7 @@ class BusinessLogicTests {
             assertFalse(disabledViewer.common.enabled)
 
             val defaultViewer = config.messageViewerList[2]
-            assertFalse(defaultViewer.common.enabled) // Should default to false
+            assertTrue(defaultViewer.common.enabled) // Should default to true
         }
     }
 }

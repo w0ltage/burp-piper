@@ -23,65 +23,52 @@ class ComponentTests {
         val yamlConfig =
                 """
             messageViewers:
-            - common:
-                name: Test Message Viewer
-                enabled: true
-                cmd:
-                  prefix: [cat]
-                  inputMethod: stdin
+            - name: Test Message Viewer
+              enabled: true
+              prefix: [cat]
+              inputMethod: stdin
 
             macros:
-            - common:
-                name: Test Macro
-                enabled: true
-                cmd:
-                  prefix: [echo, "test"]
-                  inputMethod: stdin
+            - name: Test Macro
+              enabled: true
+              prefix: [echo, "test"]
+              inputMethod: stdin
 
             httpListeners:
-            - common:
-                name: Test HTTP Listener
-                enabled: true
-                cmd:
-                  prefix: [grep, "-i"]
-                  inputMethod: stdin
+            - name: Test HTTP Listener
+              enabled: true
+              prefix: [grep, "-i"]
+              inputMethod: stdin
+              scope: REQUEST
 
             highlighters:
-            - common:
-                name: Test Highlighter
-                enabled: true
-                cmd:
-                  prefix: [grep, "error"]
-                  inputMethod: stdin
+            - name: Test Highlighter
+              enabled: true
+              prefix: [grep, "error"]
+              inputMethod: stdin
               color: red
               overwrite: true
               applyWithListener: false
 
             commentators:
-            - common:
-                name: Test Commentator
-                enabled: true
-                cmd:
-                  prefix: [awk, "'{print $1}'"]
-                  inputMethod: stdin
+            - name: Test Commentator
+              enabled: true
+              prefix: [awk, "'{print $1}'"]
+              inputMethod: stdin
               overwrite: false
               applyWithListener: true
 
             intruderPayloadProcessors:
-            - common:
-                name: Test Payload Processor
-                enabled: true
-                cmd:
-                  prefix: [base64]
-                  inputMethod: stdin
+            - name: Test Payload Processor
+              enabled: true
+              prefix: [base64]
+              inputMethod: stdin
 
             intruderPayloadGenerators:
-            - common:
-                name: Test Payload Generator
-                enabled: true
-                cmd:
-                  prefix: [seq, "1", "10"]
-                  inputMethod: stdin
+            - name: Test Payload Generator
+              enabled: true
+              prefix: [seq, "1", "10"]
+              inputMethod: stdin
         """.trimIndent()
 
         testConfig = configFromYaml(yamlConfig)
@@ -117,7 +104,7 @@ class ComponentTests {
         fun `extract enabled tools correctly`() {
             // Get enabled tools for each type
             val enabledMessageViewers = testConfig.messageViewerList.filter { it.common.enabled }
-            val enabledMacros = testConfig.macroList.filter { it.common.enabled }
+            val enabledMacros = testConfig.macroList.filter { it.enabled }
             val enabledHttpListeners = testConfig.httpListenerList.filter { it.common.enabled }
             val enabledHighlighters = testConfig.highlighterList.filter { it.common.enabled }
             val enabledCommentators = testConfig.commentatorList.filter { it.common.enabled }
@@ -131,7 +118,7 @@ class ComponentTests {
 
             // Verify names
             assertEquals("Test Message Viewer", enabledMessageViewers[0].common.name)
-            assertEquals("Test Macro", enabledMacros[0].common.name)
+            assertEquals("Test Macro", enabledMacros[0].name)
             assertEquals("Test HTTP Listener", enabledHttpListeners[0].common.name)
             assertEquals("Test Highlighter", enabledHighlighters[0].common.name)
             assertEquals("Test Commentator", enabledCommentators[0].common.name)
@@ -142,18 +129,18 @@ class ComponentTests {
         fun `handle command prefix parsing correctly`() {
             // Test message viewer command
             val messageViewer = testConfig.messageViewerList[0]
-            assertEquals(1, messageViewer.common.cmd.prefixCount)
+            assertEquals(1, messageViewer.common.cmd.prefixList.size)
             assertEquals("cat", messageViewer.common.cmd.prefixList[0])
 
             // Test macro command with multiple parameters
             val macro = testConfig.macroList[0]
-            assertEquals(2, macro.common.cmd.prefixCount)
-            assertEquals("echo", macro.common.cmd.prefixList[0])
-            assertEquals("test", macro.common.cmd.prefixList[1])
+            assertEquals(2, macro.cmd.prefixList.size)
+            assertEquals("echo", macro.cmd.prefixList[0])
+            assertEquals("test", macro.cmd.prefixList[1])
 
             // Test HTTP listener command
             val httpListener = testConfig.httpListenerList[0]
-            assertEquals(2, httpListener.common.cmd.prefixCount)
+            assertEquals(2, httpListener.common.cmd.prefixList.size)
             assertEquals("grep", httpListener.common.cmd.prefixList[0])
             assertEquals("-i", httpListener.common.cmd.prefixList[1])
         }
@@ -203,14 +190,14 @@ class ComponentTests {
             // Test all tools have required command components
             testConfig.messageViewerList.forEach { viewer ->
                 assertTrue(viewer.common.hasCmd(), "Message viewer should have command")
-                assertTrue(viewer.common.cmd.prefixCount > 0, "Command should have prefix")
+                assertTrue(viewer.common.cmd.prefixList.size > 0, "Command should have prefix")
                 assertTrue(viewer.common.name.isNotEmpty(), "Tool should have name")
             }
 
             testConfig.macroList.forEach { macro ->
-                assertTrue(macro.common.hasCmd(), "Macro should have command")
-                assertTrue(macro.common.cmd.prefixCount > 0, "Command should have prefix")
-                assertTrue(macro.common.name.isNotEmpty(), "Tool should have name")
+                assertTrue(macro.hasCmd(), "Macro should have command")
+                assertTrue(macro.cmd.prefixList.size > 0, "Command should have prefix")
+                assertTrue(macro.name.isNotEmpty(), "Tool should have name")
             }
         }
 
@@ -226,10 +213,7 @@ class ComponentTests {
             }
 
             testConfig.macroList.forEach { macro ->
-                assertEquals(
-                        Piper.CommandInvocation.InputMethod.STDIN,
-                        macro.common.cmd.inputMethod
-                )
+                assertEquals(Piper.CommandInvocation.InputMethod.STDIN, macro.cmd.inputMethod)
             }
 
             testConfig.httpListenerList.forEach { listener ->
@@ -249,22 +233,17 @@ class ComponentTests {
         @DisplayName("should create default config model without errors")
         fun `create default config model without errors`() {
             // Act - create with null API (component test - no API dependency)
-            val configModel =
-                    try {
-                        // We can't instantiate ConfigModel without MontoyaApi, but we can test
-                        // the static methods and configuration loading logic
-                        val defaultConfig = Piper.Config.getDefaultInstance()
-                        assertNotNull(defaultConfig)
-                        defaultConfig
-                    } catch (e: Exception) {
-                        fail(
-                                "Should be able to create default config without exceptions: ${e.message}"
-                        )
-                        null
-                    }
+            try {
+                // We can't instantiate ConfigModel without MontoyaApi, but we can test
+                // the static methods and configuration loading logic
+                val defaultConfig = Piper.Config.getDefaultInstance()
+                assertNotNull(defaultConfig)
 
-            // Assert
-            assertNotNull(configModel)
+                // Assert
+                assertNotNull(defaultConfig)
+            } catch (e: Exception) {
+                fail("Should be able to create default config without exceptions: ${e.message}")
+            }
         }
 
         @Test
@@ -283,8 +262,8 @@ class ComponentTests {
             assertTrue(messageViewer.common.enabled)
 
             val macro = originalConfig.macroList[0]
-            assertEquals("Test Macro", macro.common.name)
-            assertEquals(2, macro.common.cmd.prefixCount)
+            assertEquals("Test Macro", macro.name)
+            assertEquals(2, macro.cmd.prefixList.size)
         }
     }
 
@@ -299,18 +278,14 @@ class ComponentTests {
             val mixedYaml =
                     """
                 messageViewers:
-                - common:
-                    name: Enabled Viewer
-                    enabled: true
-                    cmd:
-                      prefix: [cat]
-                      inputMethod: stdin
-                - common:
-                    name: Disabled Viewer
-                    enabled: false
-                    cmd:
-                      prefix: [head]
-                      inputMethod: stdin
+                - name: Enabled Viewer
+                  enabled: true
+                  prefix: [cat]
+                  inputMethod: stdin
+                - name: Disabled Viewer
+                  enabled: false
+                  prefix: [head]
+                  inputMethod: stdin
             """.trimIndent()
 
             val mixedConfig = configFromYaml(mixedYaml)
@@ -332,22 +307,20 @@ class ComponentTests {
             val complexYaml =
                     """
                 macros:
-                - common:
-                    name: Complex Command
-                    enabled: true
-                    cmd:
-                      prefix: [python3, -c, "import sys; print(sys.stdin.read().upper())"]
-                      inputMethod: stdin
+                - name: Complex Command
+                  enabled: true
+                  prefix: [python3, -c, "import sys; print(sys.stdin.read().upper())"]
+                  inputMethod: stdin
             """.trimIndent()
 
             val complexConfig = configFromYaml(complexYaml)
             val complexMacro = complexConfig.macroList[0]
 
             // Assert complex command is parsed correctly
-            assertEquals(3, complexMacro.common.cmd.prefixCount)
-            assertEquals("python3", complexMacro.common.cmd.prefixList[0])
-            assertEquals("-c", complexMacro.common.cmd.prefixList[1])
-            assertTrue(complexMacro.common.cmd.prefixList[2].contains("import sys"))
+            assertEquals(3, complexMacro.cmd.prefixList.size)
+            assertEquals("python3", complexMacro.cmd.prefixList[0])
+            assertEquals("-c", complexMacro.cmd.prefixList[1])
+            assertTrue(complexMacro.cmd.prefixList[2].contains("import sys"))
         }
     }
 
@@ -379,11 +352,11 @@ class ComponentTests {
             assertNotNull(validTool.common.name)
             assertNotNull(validTool.common.cmd)
             assertTrue(validTool.common.name.isNotEmpty())
-            assertTrue(validTool.common.cmd.prefixCount > 0)
+            assertTrue(validTool.common.cmd.prefixList.size > 0)
 
             // Test command validation
             val command = validTool.common.cmd
-            assertTrue(command.hasInputMethod())
+            assertTrue(command.inputMethod != null)
             assertEquals(Piper.CommandInvocation.InputMethod.STDIN, command.inputMethod)
         }
     }

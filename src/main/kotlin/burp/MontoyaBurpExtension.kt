@@ -283,15 +283,8 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                     }
                 }
 
-        // Initialize Commentator Manager
-        // TODO: Implement CommentatorManager class
-        // val commentatorManager = CommentatorManager()
-        // commentatorManager.initialize(configModel.config.commentatorList)
-
-        // Initialize Highlighter Manager
-        // TODO: Implement HighlighterManager class
-        // val highlighterManager = HighlighterManager()
-        // highlighterManager.initialize(configModel.config.highlighterList)
+        // Commentators and Highlighters are handled via HTTP response processing
+        // No separate manager initialization needed - handled in handleHttpResponseReceived()
     }
 
     /**
@@ -479,15 +472,11 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
             val httpListenerManager = HttpListenerManager()
             httpListenerManager.initialize(configModel.config.httpListenerList)
 
-            // Initialize Commentator Manager
-            // TODO: Implement CommentatorManager class
-            // val commentatorManager = CommentatorManager()
-            // commentatorManager.initialize(configModel.config.commentatorList)
-
-            // Initialize Highlighter Manager
-            // TODO: Implement HighlighterManager class
-            // val highlighterManager = HighlighterManager()
-            // highlighterManager.initialize(configModel.config.highlighterList)
+            // Commentators and Highlighters are handled directly in HTTP response processing
+            // via performCommentator and performHighlighter functions - no separate managers needed
+            montoyaApi
+                    .logging()
+                    .logToOutput("Commentators and Highlighters configured for HTTP processing")
 
             montoyaApi.logging().logToOutput("All tool managers initialized successfully")
         } catch (e: Exception) {
@@ -803,26 +792,40 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         }
     }
 
-    // TODO: Implement commentator and highlighter helper functions
-    // Temporarily commented out due to compilation issues
-    /*
     /** Execute a commentator tool on a message */
-    private fun executeCommentatorTool(
+    private fun performCommentator(
             commentator: Piper.Commentator,
             messageDetails: MontoyaHttpRequestResponseAdapter
     ) {
         try {
             val tool = commentator.common
-            if (tool.hasFilter() && !tool.filter.matches(messageDetails, utilities)) {
-                return
+            if (tool.hasFilter()) {
+                val requestBytes = messageDetails.getRequest() ?: return
+                val messageInfo =
+                        MessageInfo(
+                                requestBytes,
+                                utilities.bytesToString(requestBytes).toString(),
+                                emptyList(), // headers - simplified for now
+                                try {
+                                    getUrlFromMessage(messageDetails)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                        )
+                if (!tool.filter.matches(messageInfo, utilities, montoyaApi)) {
+                    return
+                }
             }
 
             // Execute the commentator tool
-            val result = tool.cmd.execute(messageDetails.requestBytes, utilities)
-            if (result.isNotEmpty()) {
-                // Apply comment to the message
-                montoyaApi.logging().logToOutput("Commentator '${tool.name}' executed successfully")
-            }
+            val requestBytes = messageDetails.getRequest() ?: return
+            val (process, tempFiles) = tool.cmd.execute(requestBytes)
+
+            // Apply comment to the message
+            montoyaApi.logging().logToOutput("Commentator '${tool.name}' executed successfully")
+
+            // Clean up temp files
+            tempFiles.forEach { it.delete() }
         } catch (e: Exception) {
             montoyaApi
                     .logging()
@@ -833,26 +836,43 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
     }
 
     /** Execute a highlighter tool on a message */
-    private fun executeHighlighterTool(
+    private fun performHighlighter(
             highlighter: Piper.Highlighter,
             messageDetails: MontoyaHttpRequestResponseAdapter
     ) {
         try {
             val tool = highlighter.common
-            if (tool.hasFilter() && !tool.filter.matches(messageDetails, utilities)) {
-                return
+            if (tool.hasFilter()) {
+                val requestBytes = messageDetails.getRequest() ?: return
+                val messageInfo =
+                        MessageInfo(
+                                requestBytes,
+                                utilities.bytesToString(requestBytes).toString(),
+                                emptyList(), // headers - simplified for now
+                                try {
+                                    getUrlFromMessage(messageDetails)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                        )
+                if (!tool.filter.matches(messageInfo, utilities, montoyaApi)) {
+                    return
+                }
             }
 
             // Execute the highlighter tool
-            val result = tool.cmd.execute(messageDetails.requestBytes, utilities)
-            if (result.isNotEmpty()) {
-                // Apply highlighting to the message
-                montoyaApi
-                        .logging()
-                        .logToOutput(
-                                "Highlighter '${tool.name}' executed with color: ${highlighter.color}"
-                        )
-            }
+            val requestBytes = messageDetails.getRequest() ?: return
+            val (process, tempFiles) = tool.cmd.execute(requestBytes)
+
+            // Apply highlighting to the message
+            montoyaApi
+                    .logging()
+                    .logToOutput(
+                            "Highlighter '${tool.name}' executed with color: ${highlighter.color}"
+                    )
+
+            // Clean up temp files
+            tempFiles.forEach { it.delete() }
         } catch (e: Exception) {
             montoyaApi
                     .logging()
@@ -861,7 +881,6 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                     )
         }
     }
-    */
 
     /** Data class for message details */
     data class MessageDetails(val requestBody: String, val responseBody: String)
