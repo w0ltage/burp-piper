@@ -1,0 +1,137 @@
+/*
+ * This file is part of Piper for Burp Suite (https://github.com/silentsignal/burp-piper)
+ * Copyright (c) 2018 Andras Veres-Szentkiralyi
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package burp;
+
+message RegularExpression {
+    string pattern = 1;
+    int32 flags = 2;
+}
+
+message HeaderMatch {
+    string header = 1;
+    RegularExpression regex = 2;
+}
+
+message CommandInvocation {
+    repeated string prefix = 1;
+    repeated string postfix = 2;
+    enum InputMethod {
+        STDIN = 0;
+        FILENAME = 1;
+    }
+    InputMethod inputMethod = 3;
+    bool passHeaders = 4;
+    repeated string requiredInPath = 5;
+    repeated int32 exitCode = 6;
+    MessageMatch stdout = 7;
+    MessageMatch stderr = 8;
+}
+
+message MessageMatch {
+    bytes prefix = 1;
+    bytes postfix = 2;
+    RegularExpression regex = 3;
+    HeaderMatch header = 4;
+    CommandInvocation cmd = 5;
+    bool negation = 6;
+    repeated MessageMatch andAlso = 7;
+    repeated MessageMatch orElse = 8;
+    bool inScope = 9;
+}
+
+message MinimalTool {
+    string name = 1;
+    CommandInvocation cmd = 2;
+    MessageMatch filter = 3;
+    bool enabled = 4;
+    enum Scope {
+        REQUEST_RESPONSE = 0;
+        REQUEST_ONLY = 1;
+        RESPONSE_ONLY = 2;
+    }
+    Scope scope = 5;
+}
+
+message UserActionTool {
+    MinimalTool common = 1;
+    bool hasGUI = 2;
+    int32 maxInputs = 3;
+    int32 minInputs = 4;
+    bool avoidPipe = 5;
+}
+
+message MessageViewer {
+    MinimalTool common = 1;
+    bool usesColors = 2;
+}
+
+enum HttpListenerScope {
+    REQUEST = 0;
+    RESPONSE = 1;
+    RESPONSE_WITH_REQUEST = 2;
+}
+
+message HttpListener {
+    MinimalTool common = 1;
+    int32 tool = 2;
+    HttpListenerScope scope = 3;
+    bool ignoreOutput = 4;
+}
+
+message Commentator {
+    MinimalTool common = 1;
+    // 2 was RequestResponse
+    bool overwrite = 3;
+    bool applyWithListener = 4;
+}
+
+message Highlighter {
+    MinimalTool common = 1;
+    string color = 2;
+    bool overwrite = 3;
+    bool applyWithListener = 4;
+}
+
+message Config {
+    repeated MinimalTool macro = 1;
+    repeated MessageViewer messageViewer = 2;
+    repeated UserActionTool menuItem = 3;
+    repeated HttpListener httpListener = 4;
+    repeated Commentator commentator = 5;
+    bool developer = 6;
+    repeated MinimalTool intruderPayloadProcessor = 7;
+    repeated Highlighter highlighter = 8;
+    repeated MinimalTool intruderPayloadGenerator = 9;
+}
+
+message MimeTypes {
+    repeated Type type = 1;
+
+    message Type {
+        string name = 1;
+        repeated Subtype subtype = 2;
+    }
+
+    message Subtype {
+        string name = 1;
+        string extension = 2;
+    }
+}
