@@ -32,6 +32,7 @@ import java.net.URL
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.*
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
@@ -44,6 +45,14 @@ import kotlin.concurrent.thread
 const val NAME = "Piper"
 const val EXTENSION_SETTINGS_KEY = "settings"
 const val CONFIG_ENV_VAR = "PIPER_CONFIG"
+
+private val MESSAGE_VIEWERS_DISABLED_BY_DEFAULT = setOf(
+        "OpenSSL ASN.1 decoder",
+        "DumpASN1",
+        "Python JSON formatter",
+        "hd",
+        "ProtoBuf"
+)
 
 data class MessageInfo(val content: ByteArray, val text: String, val headers: List<String>?, val url: URL?, val hrr: IHttpRequestResponse? = null) {
     val asContentExtensionPair: Pair<ByteArray, String?> get() {
@@ -101,13 +110,26 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
     override fun intervalAdded(p0: ListDataEvent?)   = saveConfig()
     override fun intervalRemoved(p0: ListDataEvent?) = saveConfig()
 
-    private inner class MessageViewerManager : RegisteredToolManager<Piper.MessageViewer, IMessageEditorTabFactory>(
-            configModel.messageViewersModel, callbacks::removeMessageEditorTabFactory, callbacks::registerMessageEditorTabFactory) {
+    private data class MessageViewerRegistration(val factory: IMessageEditorTabFactory,
+                                                  val enabledFlag: AtomicBoolean)
+
+    private inner class MessageViewerManager : RegisteredToolManager<Piper.MessageViewer, MessageViewerRegistration>(
+            configModel.messageViewersModel,
+            { registration ->
+                registration.enabledFlag.set(false)
+                callbacks.removeMessageEditorTabFactory(registration.factory)
+            },
+            { registration -> callbacks.registerMessageEditorTabFactory(registration.factory) }) {
         override fun isModelItemEnabled(item: Piper.MessageViewer): Boolean = item.common.enabled
 
-        override fun modelToBurp(modelItem: Piper.MessageViewer): IMessageEditorTabFactory = IMessageEditorTabFactory { _, _ ->
-            if (modelItem.usesColors) TerminalEditor(modelItem, helpers, callbacks, context)
-            else TextEditor(modelItem, helpers, callbacks, context)
+        override fun modelToBurp(modelItem: Piper.MessageViewer): MessageViewerRegistration {
+            val enabledFlag = AtomicBoolean(true)
+            val factory = IMessageEditorTabFactory { _, _ ->
+                val supplier = enabledFlag::get
+                if (modelItem.usesColors) TerminalEditor(modelItem, helpers, callbacks, context, supplier)
+                else TextEditor(modelItem, helpers, callbacks, context, supplier)
+            }
+            return MessageViewerRegistration(factory, enabledFlag)
         }
     }
 
@@ -786,7 +808,18 @@ private fun importConfig(fmt: ConfigFormat, cfg: ConfigModel, parent: Component?
 fun loadDefaultConfig(): Piper.Config {
     // TODO use more efficient Protocol Buffers encoded version
     return configFromYaml(BurpExtender::class.java.classLoader
-            .getResourceAsStream("defaults.yaml").reader().readText()).updateEnabled(true)
+            .getResourceAsStream("defaults.yaml").reader().readText())
+            .updateEnabled(true)
+            .disableMessageViewersByName(MESSAGE_VIEWERS_DISABLED_BY_DEFAULT)
+}
+
+private fun Piper.Config.disableMessageViewersByName(names: Set<String>): Piper.Config {
+    val builder = this.toBuilder()
+    builder.clearMessageViewer()
+    builder.addAllMessageViewer(this.messageViewerList.map { viewer ->
+        if (viewer.common.name in names) viewer.buildEnabled(false) else viewer
+    })
+    return builder.build()
 }
 
 private fun handleGUI(process: Process, tools: List<Piper.MinimalTool>) {
