@@ -2,7 +2,9 @@ package burp
 
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.core.Annotations
+import burp.api.montoya.core.Marker
 import burp.api.montoya.http.HttpService
+import burp.api.montoya.http.handler.TimingData
 import burp.api.montoya.http.message.HttpRequestResponse
 import burp.api.montoya.http.message.requests.HttpRequest
 import burp.api.montoya.http.message.responses.HttpResponse
@@ -55,6 +57,37 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
                 request.contentType()
         override fun statusCode(): Short = response?.statusCode() ?: 0
 
+        override fun requestMarkers(): MutableList<Marker> = mutableListOf()
+        override fun responseMarkers(): MutableList<Marker> = mutableListOf()
+
+        override fun withRequestMarkers(requestMarkers: MutableList<Marker>): HttpRequestResponse =
+                this
+        override fun withRequestMarkers(vararg requestMarkers: Marker): HttpRequestResponse = this
+        override fun withResponseMarkers(
+                responseMarkers: MutableList<Marker>
+        ): HttpRequestResponse = this
+        override fun withResponseMarkers(vararg responseMarkers: Marker): HttpRequestResponse = this
+
+        override fun copyToTempFile(): HttpRequestResponse = this
+
+        override fun contains(searchTerm: String, caseSensitive: Boolean): Boolean {
+            val requestStr = request.toString()
+            val responseStr = response?.toString() ?: ""
+            val combined = requestStr + responseStr
+            return if (caseSensitive) {
+                combined.contains(searchTerm)
+            } else {
+                combined.lowercase().contains(searchTerm.lowercase())
+            }
+        }
+
+        override fun contains(pattern: java.util.regex.Pattern): Boolean {
+            val requestStr = request.toString()
+            val responseStr = response?.toString() ?: ""
+            val combined = requestStr + responseStr
+            return pattern.matcher(combined).find()
+        }
+
         override fun withAnnotations(annotations: Annotations): HttpRequestResponse {
             // Return a new instance with updated annotations (immutable pattern)
             return object : HttpRequestResponse {
@@ -68,16 +101,33 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
                 override fun contentType(): burp.api.montoya.http.message.ContentType =
                         this@QueuedHttpRequestResponse.contentType()
                 override fun statusCode(): Short = this@QueuedHttpRequestResponse.statusCode()
-                override fun timingData():
-                        java.util.Optional<burp.api.montoya.http.message.TimingData> =
+                override fun requestMarkers(): MutableList<Marker> = mutableListOf()
+                override fun responseMarkers(): MutableList<Marker> = mutableListOf()
+                override fun withRequestMarkers(
+                        requestMarkers: MutableList<Marker>
+                ): HttpRequestResponse = this
+                override fun withRequestMarkers(
+                        vararg requestMarkers: Marker
+                ): HttpRequestResponse = this
+                override fun withResponseMarkers(
+                        responseMarkers: MutableList<Marker>
+                ): HttpRequestResponse = this
+                override fun withResponseMarkers(
+                        vararg responseMarkers: Marker
+                ): HttpRequestResponse = this
+                override fun copyToTempFile(): HttpRequestResponse = this
+                override fun contains(searchTerm: String, caseSensitive: Boolean): Boolean =
+                        this@QueuedHttpRequestResponse.contains(searchTerm, caseSensitive)
+                override fun contains(pattern: java.util.regex.Pattern): Boolean =
+                        this@QueuedHttpRequestResponse.contains(pattern)
+                override fun timingData(): java.util.Optional<TimingData> =
                         java.util.Optional.empty()
                 override fun withAnnotations(annotations: Annotations): HttpRequestResponse =
                         this@QueuedHttpRequestResponse.withAnnotations(annotations)
             }
         }
 
-        override fun timingData(): java.util.Optional<burp.api.montoya.http.message.TimingData> =
-                java.util.Optional.empty()
+        override fun timingData(): java.util.Optional<TimingData> = java.util.Optional.empty()
 
         override fun toString(): String = toHumanReadable(this)
     }
@@ -174,31 +224,28 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
         val config = configModel.config
 
         // Add minimal tools
-        val enabledMinimalTools = configModel.macrosModel.toIterable().filter { it.enabled }
+        val enabledMinimalTools =
+                configModel.macrosModel.toIterable().filter { tool -> tool.enabled }
         if (enabledMinimalTools.isNotEmpty()) {
             enabledMinimalTools.forEach { tool ->
-                val menuItem =
-                        JMenuItem(tool.name).apply {
-                            addActionListener { processItemsWithTool(selectedItems, tool) }
-                        }
+                val menuItem = JMenuItem(tool.name)
+                menuItem.addActionListener { processItemsWithTool(selectedItems, tool) }
                 popupMenu.add(menuItem)
             }
         }
 
         // Add user action tools if any
         val enabledUserActionTools =
-                configModel.userActionToolsModel.toIterable().filter { it.enabled }
+                configModel.userActionToolsModel.toIterable().filter { tool -> tool.common.enabled }
         if (enabledUserActionTools.isNotEmpty()) {
             if (enabledMinimalTools.isNotEmpty()) {
                 popupMenu.addSeparator()
             }
             enabledUserActionTools.forEach { tool ->
-                val menuItem =
-                        JMenuItem(tool.common.name).apply {
-                            addActionListener { _ ->
-                                processItemsWithUserActionTool(selectedItems, tool)
-                            }
-                        }
+                val menuItem = JMenuItem(tool.common.name)
+                menuItem.addActionListener { _ ->
+                    processItemsWithUserActionTool(selectedItems, tool)
+                }
                 popupMenu.add(menuItem)
             }
         }
@@ -238,7 +285,7 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
             montoyaApi
                     .logging()
                     .logToOutput(
-                            "Processing ${items.size} queue items with user action: ${tool.name}"
+                            "Processing ${items.size} queue items with user action: ${tool.common.name}"
                     )
 
             // This would execute the user action tool
@@ -248,7 +295,7 @@ class Queue(private val montoyaApi: MontoyaApi, private val configModel: ConfigM
             montoyaApi
                     .logging()
                     .logToError(
-                            "Error processing items with user action '${tool.name}': ${e.message}"
+                            "Error processing items with user action '${tool.common.name}': ${e.message}"
                     )
         }
     }

@@ -211,10 +211,10 @@ abstract class RegisteredToolManager<T, R>(
     protected open fun getItemName(modelItem: T): String {
         return when (modelItem) {
             is Piper.MinimalTool -> modelItem.name
-            is Piper.HttpListener -> modelItem.name
-            is Piper.UserActionTool -> modelItem.name
-            is Piper.Commentator -> modelItem.name
-            is Piper.Highlighter -> modelItem.name
+            is Piper.HttpListener -> modelItem.common.name
+            is Piper.UserActionTool -> modelItem.common.name
+            is Piper.Commentator -> modelItem.common.name
+            is Piper.Highlighter -> modelItem.common.name
             else -> modelItem.toString()
         }
     }
