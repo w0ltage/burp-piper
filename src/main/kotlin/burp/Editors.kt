@@ -8,7 +8,8 @@ import kotlin.concurrent.thread
 
 abstract class Editor(private val tool: Piper.MessageViewer,
                       protected val helpers: IExtensionHelpers,
-                      private val callbacks: IBurpExtenderCallbacks) : IMessageEditorTab {
+                      private val callbacks: IBurpExtenderCallbacks,
+                      private val context: PiperContext) : IMessageEditorTab {
     private var msg: ByteArray? = null
 
     override fun getMessage(): ByteArray? = msg
@@ -25,11 +26,11 @@ abstract class Editor(private val tool: Piper.MessageViewer,
 
         if (!tool.common.hasFilter()) {
             val cmd = tool.common.cmd
-            return !cmd.hasFilter || cmd.matches(payload, helpers, callbacks) // TODO cache output
+            return !cmd.hasFilter || cmd.matches(payload, context) // TODO cache output
         }
 
         val mi = MessageInfo(payload, helpers.bytesToString(payload), rr.getHeaders(content, helpers), url = null)
-        return tool.common.filter.matches(mi, helpers, callbacks)
+        return tool.common.filter.matches(mi, context)
     }
 
     override fun setMessage(content: ByteArray?, isRequest: Boolean) {
@@ -51,7 +52,7 @@ abstract class Editor(private val tool: Piper.MessageViewer,
     abstract override fun getUiComponent(): Component
 }
 
-class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks) : Editor(tool, helpers, callbacks) {
+class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks, context: PiperContext) : Editor(tool, helpers, callbacks, context) {
     private val terminal = JTerminal()
     private val scrollPane = JScrollPane()
 
@@ -77,7 +78,7 @@ class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, call
 }
 
 class TextEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers,
-                 callbacks: IBurpExtenderCallbacks) : Editor(tool, helpers, callbacks) {
+                 callbacks: IBurpExtenderCallbacks, context: PiperContext) : Editor(tool, helpers, callbacks, context) {
     private val editor = callbacks.createTextEditor()
 
     init {

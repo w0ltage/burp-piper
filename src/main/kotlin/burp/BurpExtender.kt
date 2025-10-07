@@ -87,9 +87,15 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
 
     private lateinit var callbacks: IBurpExtenderCallbacks
     private lateinit var helpers: IExtensionHelpers
+    private lateinit var context: PiperContext
     private lateinit var configModel: ConfigModel
     private val queue = Queue()
     private val tabs = JTabbedPane()
+
+    private inner class LegacyPiperContext : PiperContext {
+        override fun bytesToString(data: ByteArray): String = helpers.bytesToString(data)
+        override fun isInScope(url: URL): Boolean = callbacks.isInScope(url)
+    }
 
     override fun contentsChanged(p0: ListDataEvent?) = saveConfig()
     override fun intervalAdded(p0: ListDataEvent?)   = saveConfig()
@@ -100,8 +106,8 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         override fun isModelItemEnabled(item: Piper.MessageViewer): Boolean = item.common.enabled
 
         override fun modelToBurp(modelItem: Piper.MessageViewer): IMessageEditorTabFactory = IMessageEditorTabFactory { _, _ ->
-            if (modelItem.usesColors) TerminalEditor(modelItem, helpers, callbacks)
-            else TextEditor(modelItem, helpers, callbacks)
+            if (modelItem.usesColors) TerminalEditor(modelItem, helpers, callbacks, context)
+            else TextEditor(modelItem, helpers, callbacks, context)
         }
     }
 
@@ -136,7 +142,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         override fun modelToBurp(modelItem: Piper.MinimalTool): IIntruderPayloadProcessor = object : IIntruderPayloadProcessor {
             override fun processPayload(currentPayload: ByteArray, originalPayload: ByteArray, baseValue: ByteArray): ByteArray? =
                     if (modelItem.hasFilter() && !modelItem.filter.matches(MessageInfo(currentPayload, helpers.bytesToString(currentPayload),
-                                    headers = null, url = null), helpers, callbacks)) null
+                                    headers = null, url = null), context)) null
                     else getStdoutWithErrorHandling(modelItem.cmd.execute(currentPayload), modelItem)
 
             override fun getProcessorName(): String = modelItem.name
@@ -221,6 +227,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
     override fun registerExtenderCallbacks(callbacks: IBurpExtenderCallbacks) {
         this.callbacks = callbacks
         helpers = callbacks.helpers
+        context = LegacyPiperContext()
         configModel = ConfigModel(loadConfig())
 
         configModel.menuItemsModel.addListDataListener(this)  // Menu items are loaded on-demand, thus saving the config is enough
@@ -285,7 +292,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         if (lastBody == null) return
         if (this.hasFilter() && !this.filter.matches(MessageInfo(lastBody, helpers.bytesToString(lastBody),
                         headers, try { helpers.analyzeRequest(messageInfo).url } catch (_: Exception) { null }),
-                        helpers, callbacks)) return
+                        context)) return
         val input = body.mapNotNull(Pair<ByteArray?, List<String>>::first).toTypedArray()
         val replacement = getStdoutWithErrorHandling(this.cmd.execute(*input), this)
         if (!ignoreOutput) {
@@ -476,7 +483,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
     }
 
     private fun isToolApplicable(tool: Piper.MinimalTool, msrc: MessageSource, md: List<MessageInfo>, mims: MessageInfoMatchStrategy) =
-            tool.cmd.passHeaders == msrc.region.includeHeaders && tool.isInToolScope(msrc.direction.isRequest) && tool.canProcess(md, mims, helpers, callbacks)
+            tool.cmd.passHeaders == msrc.region.includeHeaders && tool.isInToolScope(msrc.direction.isRequest) && tool.canProcess(md, mims, context)
 
     inner class Queue : JPanel(BorderLayout()), ListDataListener, ListSelectionListener, MouseListener {
 
@@ -630,7 +637,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         messages.forEach { mi ->
             val hrr = mi.hrr ?: return@forEach
             if ((hrr.comment.isNullOrEmpty() || cfgItem.overwrite) &&
-                    (!cfgItem.common.hasFilter() || cfgItem.common.filter.matches(mi, helpers, callbacks))) {
+                    (!cfgItem.common.hasFilter() || cfgItem.common.filter.matches(mi, context))) {
                 val stdout = cfgItem.common.cmd.execute(mi.asContentExtensionPair).processOutput { process ->
                     process.inputStream.readBytes()
                 }
@@ -643,8 +650,8 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         messages.forEach { mi ->
             val hrr = mi.hrr ?: return@forEach
             if ((hrr.highlight.isNullOrEmpty() || cfgItem.overwrite) &&
-                    (!cfgItem.common.hasFilter() || cfgItem.common.filter.matches(mi, helpers, callbacks)) &&
-                    cfgItem.common.cmd.matches(mi.content, helpers, callbacks)) {
+                    (!cfgItem.common.hasFilter() || cfgItem.common.filter.matches(mi, context)) &&
+                    cfgItem.common.cmd.matches(mi.content, context)) {
                 val h = Highlight.fromString(cfgItem.color) ?: return@forEach
                 hrr.highlight = h.burpValue
             }
@@ -776,7 +783,7 @@ private fun importConfig(fmt: ConfigFormat, cfg: ConfigModel, parent: Component?
     }
 }
 
-private fun loadDefaultConfig(): Piper.Config {
+fun loadDefaultConfig(): Piper.Config {
     // TODO use more efficient Protocol Buffers encoded version
     return configFromYaml(BurpExtender::class.java.classLoader
             .getResourceAsStream("defaults.yaml").reader().readText()).updateEnabled(true)

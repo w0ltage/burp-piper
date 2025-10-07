@@ -6,9 +6,15 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.lang.RuntimeException
+import java.net.URL
 import java.util.*
 import java.util.regex.Pattern
 import javax.swing.DefaultListModel
+
+interface PiperContext {
+    fun bytesToString(data: ByteArray): String
+    fun isInScope(url: URL): Boolean
+}
 
 ////////////////////////////////////// GUI //////////////////////////////////////
 
@@ -101,9 +107,8 @@ fun Piper.MinimalTool.isInToolScope(isRequest: Boolean): Boolean =
         else -> true
     }
 
-fun Piper.MinimalTool.canProcess(md: List<MessageInfo>, mims: MessageInfoMatchStrategy, helpers: IExtensionHelpers,
-                                 callbacks: IBurpExtenderCallbacks): Boolean =
-        !this.hasFilter() || mims.predicate(md) { this.filter.matches(it, helpers, callbacks) }
+fun Piper.MinimalTool.canProcess(md: List<MessageInfo>, mims: MessageInfoMatchStrategy, context: PiperContext): Boolean =
+        !this.hasFilter() || mims.predicate(md) { this.filter.matches(it, context) }
 
 fun Piper.MinimalTool.buildEnabled(value: Boolean? = null): Piper.MinimalTool {
     val enabled = value ?: try {
@@ -121,17 +126,17 @@ fun Piper.MessageViewer .buildEnabled(value: Boolean? = null): Piper.MessageView
 fun Piper.Commentator   .buildEnabled(value: Boolean? = null): Piper.Commentator    = toBuilder().setCommon(common.buildEnabled(value)).build()
 fun Piper.Highlighter   .buildEnabled(value: Boolean? = null): Piper.Highlighter    = toBuilder().setCommon(common.buildEnabled(value)).build()
 
-fun Piper.MessageMatch.matches(message: MessageInfo, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks): Boolean = (
+fun Piper.MessageMatch.matches(message: MessageInfo, context: PiperContext): Boolean = (
         (this.prefix == null  || this.prefix.size() == 0  || message.content.startsWith(this.prefix)) &&
                 (this.postfix == null || this.postfix.size() == 0 || message.content.endsWith(this.postfix)) &&
                 (!this.hasRegex() || this.regex.matches(message.text)) &&
-                (!this.hasCmd()   || this.cmd.matches(message.content, helpers, callbacks)) &&
+                (!this.hasCmd()   || this.cmd.matches(message.content, context)) &&
 
                 (message.headers == null || !this.hasHeader() || this.header.matches(message.headers)) &&
-                (message.url == null || !this.inScope || callbacks.isInScope(message.url)) &&
+                (message.url == null || !this.inScope || context.isInScope(message.url)) &&
 
-                (this.andAlsoCount == 0 || this.andAlsoList.all { it.matches(message, helpers, callbacks) }) &&
-                (this.orElseCount  == 0 || this.orElseList.any  { it.matches(message, helpers, callbacks) })
+                (this.andAlsoCount == 0 || this.andAlsoList.all { it.matches(message, context) }) &&
+                (this.orElseCount  == 0 || this.orElseList.any  { it.matches(message, context) })
         ) xor this.negation
 
 fun ByteArray.startsWith(value: ByteString): Boolean {
@@ -172,20 +177,20 @@ fun Piper.CommandInvocation.execute(vararg inputs: Pair<ByteArray, String?>): Pa
 val Piper.CommandInvocationOrBuilder.hasFilter: Boolean
     get() = hasStderr() || hasStdout() || exitCodeCount > 0
 
-fun Piper.CommandInvocation.matches(subject: ByteArray, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks): Boolean {
+fun Piper.CommandInvocation.matches(subject: ByteArray, context: PiperContext): Boolean {
     val (process, tempFiles) = this.execute(subject)
-    if ((this.hasStderr() && !this.stderr.matches(process.errorStream, helpers, callbacks)) ||
-            (this.hasStdout() && !this.stdout.matches(process.inputStream, helpers, callbacks))) return false
+    if ((this.hasStderr() && !this.stderr.matches(process.errorStream, context)) ||
+            (this.hasStdout() && !this.stdout.matches(process.inputStream, context))) return false
     val exitCode = process.waitFor()
     tempFiles.forEach { it.delete() }
     return (this.exitCodeCount == 0) || exitCode in this.exitCodeList
 }
 
-fun Piper.MessageMatch.matches(stream: InputStream, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks): Boolean =
-        this.matches(stream.readBytes(), helpers, callbacks)
+fun Piper.MessageMatch.matches(stream: InputStream, context: PiperContext): Boolean =
+        this.matches(stream.readBytes(), context)
 
-fun Piper.MessageMatch.matches(data: ByteArray, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks): Boolean =
-        this.matches(MessageInfo(data, helpers.bytesToString(data), headers = null, url = null), helpers, callbacks)
+fun Piper.MessageMatch.matches(data: ByteArray, context: PiperContext): Boolean =
+        this.matches(MessageInfo(data, context.bytesToString(data), headers = null, url = null), context)
 
 fun Piper.HeaderMatch.matches(headers: List<String>): Boolean = headers.any {
     it.startsWith("${this.header}: ", true) &&
