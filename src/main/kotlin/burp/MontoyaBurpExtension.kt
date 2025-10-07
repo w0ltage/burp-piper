@@ -35,6 +35,7 @@ import burp.api.montoya.intruder.PayloadProcessingResult
 import burp.api.montoya.intruder.PayloadProcessor
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent
 import burp.api.montoya.ui.editor.extension.HttpRequestEditorProvider
+import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
 import burp.api.montoya.utilities.Utilities
 import java.awt.Component
 import java.io.File
@@ -63,34 +64,239 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
     private val queue by lazy { Queue(montoyaApi, configModel) }
     private val tabs = JTabbedPane()
 
-    override fun contentsChanged(p0: ListDataEvent?) = saveConfig()
-    override fun intervalAdded(p0: ListDataEvent?) = saveConfig()
-    override fun intervalRemoved(p0: ListDataEvent?) = saveConfig()
+    // Tool managers for dynamic registration updates
+    private var messageViewerManager: MessageViewerManager? = null
+    private var macroManager: MacroManager? = null
+    private var payloadProcessorManager: IntruderPayloadProcessorManager? = null
+    private var payloadGeneratorManager: IntruderPayloadGeneratorManager? = null
+    private var httpListenerManager: HttpListenerManager? = null
 
-    /** Manager for Message Viewer tools */
-    private inner class MessageViewerManager :
-            RegisteredToolManager<Piper.MessageViewer, HttpRequestEditorProvider>(
-                    montoyaApi,
-                    configModel
-            ) {
+    override fun contentsChanged(p0: ListDataEvent?) {
+        saveConfig()
+        handleSurgicalUpdate(p0)
+    }
+    override fun intervalAdded(p0: ListDataEvent?) {
+        saveConfig()
+        handleSurgicalUpdate(p0)
+    }
+    override fun intervalRemoved(p0: ListDataEvent?) {
+        saveConfig()
+        handleSurgicalUpdate(p0)
+    }
 
-        override fun getToolTypeName(): String = "Message Viewer"
+    /** Manager for Message Viewer tools - handles both request and response editors */
+    private inner class MessageViewerManager {
+        private val requestRegistrations = mutableMapOf<Piper.MessageViewer, Registration>()
+        private val responseRegistrations = mutableMapOf<Piper.MessageViewer, Registration>()
 
-        override fun isModelItemEnabled(item: Piper.MessageViewer): Boolean = item.common.enabled
-
-        override fun registerWithBurp(
-                modelItem: Piper.MessageViewer,
-                burpItem: HttpRequestEditorProvider
-        ): Registration? {
-            return montoyaApi.userInterface().registerHttpRequestEditorProvider(burpItem)
+        fun initialize(messageViewers: List<Piper.MessageViewer>): Boolean {
+            montoyaApi
+                    .logging()
+                    .logToOutput(
+                            "DEBUG: Initializing Message Viewer manager with ${messageViewers.size} tools"
+                    )
+            return registerAll(messageViewers) > 0
         }
 
-        override fun modelToBurp(modelItem: Piper.MessageViewer): HttpRequestEditorProvider =
-                HttpRequestEditorProvider { creationContext ->
+        fun registerAll(messageViewers: List<Piper.MessageViewer>): Int {
+            var successCount = 0
+            messageViewers.forEach { viewer ->
+                if (registerTool(viewer)) {
+                    successCount++
+                }
+            }
+            montoyaApi
+                    .logging()
+                    .logToOutput(
+                            "DEBUG: Registered $successCount of ${messageViewers.size} Message Viewers"
+                    )
+            return successCount
+        }
+
+        fun registerTool(modelItem: Piper.MessageViewer): Boolean {
+            return try {
+                montoyaApi.logging().logToOutput("DEBUG: Processing Message Viewer: ${modelItem}")
+
+                if (!modelItem.common.enabled) {
+                    montoyaApi
+                            .logging()
+                            .logToOutput(
+                                    "DEBUG: Skipping disabled Message Viewer: ${modelItem.common.name}"
+                            )
+                    return true
+                }
+
+                montoyaApi
+                        .logging()
+                        .logToOutput(
+                                "DEBUG: Starting registration for Message Viewer: ${modelItem}"
+                        )
+                montoyaApi.logging().logToOutput("DEBUG: Message Viewer is enabled: ${modelItem}")
+
+                // Create request editor provider
+                val requestProvider = HttpRequestEditorProvider { creationContext ->
+                    montoyaApi
+                            .logging()
+                            .logToOutput(
+                                    "DEBUG: Converting Message Viewer to Burp object: ${modelItem}"
+                            )
                     if (modelItem.usesColors)
                             MontoyaTerminalEditor(modelItem, utilities, montoyaApi)
                     else MontoyaTextEditor(modelItem, utilities, montoyaApi)
                 }
+
+                // Create response editor provider
+                val responseProvider = HttpResponseEditorProvider { creationContext ->
+                    if (modelItem.usesColors)
+                            MontoyaTerminalEditor(modelItem, utilities, montoyaApi)
+                    else MontoyaTextEditor(modelItem, utilities, montoyaApi)
+                }
+
+                // Register both request and response providers
+                montoyaApi
+                        .logging()
+                        .logToOutput("DEBUG: Registering Message Viewer with Burp: ${modelItem}")
+                val requestReg =
+                        montoyaApi
+                                .userInterface()
+                                .registerHttpRequestEditorProvider(requestProvider)
+                val responseReg =
+                        montoyaApi
+                                .userInterface()
+                                .registerHttpResponseEditorProvider(responseProvider)
+
+                if (requestReg != null && responseReg != null) {
+                    requestRegistrations[modelItem] = requestReg
+                    responseRegistrations[modelItem] = responseReg
+                    montoyaApi
+                            .logging()
+                            .logToOutput(
+                                    "DEBUG: Successfully registered Message Viewer: ${modelItem}"
+                            )
+                    true
+                } else {
+                    montoyaApi
+                            .logging()
+                            .logToError(
+                                    "DEBUG: Failed to register Message Viewer: ${modelItem.common.name}"
+                            )
+                    false
+                }
+            } catch (e: Exception) {
+                montoyaApi
+                        .logging()
+                        .logToError(
+                                "DEBUG: Error registering Message Viewer '${modelItem.common.name}': ${e.message}"
+                        )
+                e.printStackTrace()
+                false
+            }
+        }
+
+        fun unregisterTool(modelItem: Piper.MessageViewer): Boolean {
+            return try {
+                var success = true
+
+                requestRegistrations.remove(modelItem)?.let { reg ->
+                    if (reg.isRegistered) {
+                        reg.deregister()
+                    }
+                }
+                        ?: run { success = false }
+
+                responseRegistrations.remove(modelItem)?.let { reg ->
+                    if (reg.isRegistered) {
+                        reg.deregister()
+                    }
+                }
+                        ?: run { success = false }
+
+                if (success) {
+                    montoyaApi
+                            .logging()
+                            .logToOutput(
+                                    "DEBUG: Unregistered Message Viewer: ${modelItem.common.name}"
+                            )
+                }
+                success
+            } catch (e: Exception) {
+                montoyaApi
+                        .logging()
+                        .logToError(
+                                "ERROR: Failed to unregister Message Viewer '${modelItem.common.name}': ${e.message}"
+                        )
+                false
+            }
+        }
+
+        fun unregisterAll(): Int {
+            var successCount = 0
+            val allViewers = (requestRegistrations.keys + responseRegistrations.keys).toSet()
+
+            allViewers.forEach { viewer ->
+                if (unregisterTool(viewer)) {
+                    successCount++
+                }
+            }
+
+            requestRegistrations.clear()
+            responseRegistrations.clear()
+            montoyaApi.logging().logToOutput("DEBUG: Unregistered $successCount Message Viewers")
+            return successCount
+        }
+
+        fun refreshRegistrations(messageViewers: List<Piper.MessageViewer>): Int {
+            montoyaApi.logging().logToOutput("DEBUG: Refreshing Message Viewer registrations...")
+            unregisterAll()
+            return registerAll(messageViewers)
+        }
+
+        fun handleContentsChanged(index0: Int, index1: Int) {
+            montoyaApi
+                    .logging()
+                    .logToOutput("DEBUG: Message Viewer contents changed: $index0 to $index1")
+            val messageViewers = configModel.config.messageViewerList
+            for (i in index0..index1) {
+                if (i < messageViewers.size) {
+                    val viewer = messageViewers[i]
+                    // Unregister old version
+                    unregisterTool(viewer)
+                    // Register new version if enabled
+                    if (viewer.common.enabled) {
+                        registerTool(viewer)
+                    }
+                }
+            }
+        }
+
+        fun handleIntervalAdded(index0: Int, index1: Int) {
+            montoyaApi
+                    .logging()
+                    .logToOutput("DEBUG: Message Viewer interval added: $index0 to $index1")
+            val messageViewers = configModel.config.messageViewerList
+            for (i in index0..index1) {
+                if (i < messageViewers.size) {
+                    val viewer = messageViewers[i]
+                    if (viewer.common.enabled) {
+                        registerTool(viewer)
+                    }
+                }
+            }
+        }
+
+        fun handleIntervalRemoved(index0: Int, index1: Int) {
+            montoyaApi
+                    .logging()
+                    .logToOutput("DEBUG: Message Viewer interval removed: $index0 to $index1")
+            // For removed items, we need to unregister from our existing registrations
+            // This is tricky because the items are already removed from the model
+            // For now, refresh all to be safe
+            refreshRegistrations(configModel.config.messageViewerList)
+        }
+
+        fun getRegisteredCount(): Int {
+            return requestRegistrations.size // Should match responseRegistrations.size
+        }
     }
 
     /** Manager for Macro tools (Session Handling Actions) */
@@ -451,28 +657,28 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                     )
 
             // Initialize Message Viewer Manager
-            val messageViewerManager = MessageViewerManager()
+            messageViewerManager = MessageViewerManager()
             val messageViewers = configModel.config.messageViewerList
             montoyaApi
                     .logging()
                     .logToOutput("DEBUG: Passing ${messageViewers.size} message viewers to manager")
-            messageViewerManager.initialize(messageViewers)
+            messageViewerManager!!.initialize(messageViewers)
 
             // Initialize Macro Manager
-            val macroManager = MacroManager()
-            macroManager.initialize(configModel.config.macroList)
+            macroManager = MacroManager()
+            macroManager!!.initialize(configModel.config.macroList)
 
             // Initialize Intruder Payload Processor Manager
-            val payloadProcessorManager = IntruderPayloadProcessorManager()
-            payloadProcessorManager.initialize(configModel.config.intruderPayloadProcessorList)
+            payloadProcessorManager = IntruderPayloadProcessorManager()
+            payloadProcessorManager!!.initialize(configModel.config.intruderPayloadProcessorList)
 
             // Initialize Intruder Payload Generator Manager
-            val payloadGeneratorManager = IntruderPayloadGeneratorManager()
-            payloadGeneratorManager.initialize(configModel.config.intruderPayloadGeneratorList)
+            payloadGeneratorManager = IntruderPayloadGeneratorManager()
+            payloadGeneratorManager!!.initialize(configModel.config.intruderPayloadGeneratorList)
 
             // Initialize HTTP Listener Manager
-            val httpListenerManager = HttpListenerManager()
-            httpListenerManager.initialize(configModel.config.httpListenerList)
+            httpListenerManager = HttpListenerManager()
+            httpListenerManager!!.initialize(configModel.config.httpListenerList)
 
             // Commentators and Highlighters are handled directly in HTTP response processing
             // via performCommentator and performHighlighter functions - no separate managers needed
@@ -483,6 +689,81 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
             montoyaApi.logging().logToOutput("All tool managers initialized successfully")
         } catch (e: Exception) {
             montoyaApi.logging().logToError("Failed to initialize managers: ${e.message}")
+        }
+    }
+
+    /** Handle surgical updates to tool registrations when configuration changes */
+    private fun handleSurgicalUpdate(event: javax.swing.event.ListDataEvent?) {
+        if (event == null) return
+
+        montoyaApi
+                .logging()
+                .logToOutput(
+                        "DEBUG: Handling surgical update: ${event.type} from ${event.index0} to ${event.index1}"
+                )
+
+        try {
+            // Determine which model changed by checking the source
+            when (event.source) {
+                configModel.messageViewersModel -> {
+                    messageViewerManager?.let { manager ->
+                        when (event.type) {
+                            javax.swing.event.ListDataEvent.CONTENTS_CHANGED -> {
+                                manager.handleContentsChanged(event.index0, event.index1)
+                            }
+                            javax.swing.event.ListDataEvent.INTERVAL_ADDED -> {
+                                manager.handleIntervalAdded(event.index0, event.index1)
+                            }
+                            javax.swing.event.ListDataEvent.INTERVAL_REMOVED -> {
+                                manager.handleIntervalRemoved(event.index0, event.index1)
+                            }
+                        }
+                    }
+                }
+                // For other managers, fall back to refresh for now
+                configModel.macrosModel,
+                configModel.intruderPayloadProcessorsModel,
+                configModel.intruderPayloadGeneratorsModel,
+                configModel.httpListenersModel -> {
+                    refreshOtherToolRegistrations()
+                }
+            }
+        } catch (e: Exception) {
+            montoyaApi.logging().logToError("ERROR: Failed to handle surgical update: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    /** Refresh non-message-viewer tool registrations */
+    private fun refreshOtherToolRegistrations() {
+        try {
+            // Refresh Macros
+            macroManager?.let { manager ->
+                val macros = configModel.config.macroList
+                manager.refreshRegistrations(macros)
+            }
+
+            // Refresh Intruder Payload Processors
+            payloadProcessorManager?.let { manager ->
+                val processors = configModel.config.intruderPayloadProcessorList
+                manager.refreshRegistrations(processors)
+            }
+
+            // Refresh Intruder Payload Generators
+            payloadGeneratorManager?.let { manager ->
+                val generators = configModel.config.intruderPayloadGeneratorList
+                manager.refreshRegistrations(generators)
+            }
+
+            // Refresh HTTP Listeners
+            httpListenerManager?.let { manager ->
+                val listeners = configModel.config.httpListenerList
+                manager.refreshRegistrations(listeners)
+            }
+        } catch (e: Exception) {
+            montoyaApi
+                    .logging()
+                    .logToError("ERROR: Failed to refresh other tool registrations: ${e.message}")
         }
     }
 
