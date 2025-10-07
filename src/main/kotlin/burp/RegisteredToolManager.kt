@@ -3,284 +3,155 @@ package burp
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.core.Registration
 import burp.api.montoya.logging.Logging
-import java.util.concurrent.ConcurrentHashMap
+import javax.swing.DefaultListModel
+import javax.swing.event.ListDataEvent
+import javax.swing.event.ListDataListener
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Abstract base class for managing tool registrations with the Montoya API.
- *
- * This class provides common functionality for registering, unregistering, and managing various
- * types of tools (Message Viewers, HTTP Listeners, Context Menus, etc.) with the Burp Suite Montoya
- * API.
- *
- * @param T The model type (e.g., Piper.MinimalTool, Piper.HttpListener)
- * @param R The Burp registration type returned by the Montoya API
+ * A Montoya aware variant of the legacy [RegisteredToolManager] utility used by the original
+ * Piper extension. The manager keeps a 1:1 mapping between items stored in a Swing
+ * [DefaultListModel] and the registrations returned by the Montoya API. Whenever the model
+ * changes (items are added, updated or removed) the manager automatically registers or
+ * deregisters the associated Montoya integrations so that the Burp UI stays in sync with the
+ * configuration editor.
  */
-abstract class RegisteredToolManager<T, R>(
+abstract class RegisteredToolManager<M>(
         protected val montoyaApi: MontoyaApi,
-        protected val config: ConfigModel
-) {
+        protected val model: DefaultListModel<M>
+) : ListDataListener {
 
-    /** Map of registered tools to their Burp registrations */
-    protected val registrations = ConcurrentHashMap<T, Registration>()
+    private val logging: Logging = montoyaApi.logging()
 
-    /** Logging interface */
-    protected val logging: Logging = montoyaApi.logging()
+    /** Parallel list of registrations mirroring the Swing model order. */
+    private val registrations = mutableListOf<Registration?>()
 
-    /**
-     * Check if a model item is enabled and should be registered
-     *
-     * @param modelItem The configuration model item to check
-     * @return true if the item should be registered
-     */
-    abstract fun isModelItemEnabled(modelItem: T): Boolean
+    private var started = false
 
-    /**
-     * Convert a model item to a Burp registration object
-     *
-     * @param modelItem The configuration model item to convert
-     * @return The converted Burp object ready for registration
-     */
-    abstract fun modelToBurp(modelItem: T): R
+    /** Start tracking the backing model and register currently configured items. */
+    fun start() {
+        if (started) return
 
-    /**
-     * Register a model item with Burp Suite
-     *
-     * @param modelItem The model item to register
-     * @param burpItem The converted Burp object
-     * @return The Registration object returned by Burp, or null if registration failed
-     */
-    abstract fun registerWithBurp(modelItem: T, burpItem: R): Registration?
-
-    /** Get the name of the tool type for logging purposes */
-    abstract fun getToolTypeName(): String
-
-    /**
-     * Register a single tool
-     *
-     * @param modelItem The model item to register
-     * @return true if registration was successful
-     */
-    fun registerTool(modelItem: T): Boolean {
-        return try {
-            logging.logToOutput(
-                    "DEBUG: Starting registration for ${getToolTypeName()}: ${getItemName(modelItem)}"
-            )
-
-            if (!isModelItemEnabled(modelItem)) {
-                logging.logToOutput(
-                        "DEBUG: Skipping disabled ${getToolTypeName()}: ${getItemName(modelItem)}"
-                )
-                return true
-            }
-
-            logging.logToOutput("DEBUG: ${getToolTypeName()} is enabled: ${getItemName(modelItem)}")
-
-            // Check if already registered
-            if (registrations.containsKey(modelItem)) {
-                logging.logToOutput(
-                        "DEBUG: ${getToolTypeName()} already registered: ${getItemName(modelItem)}"
-                )
-                return true
-            }
-
-            // Convert model to Burp object
-            logging.logToOutput(
-                    "DEBUG: Converting ${getToolTypeName()} to Burp object: ${getItemName(modelItem)}"
-            )
-            val burpItem = modelToBurp(modelItem)
-
-            // Register with Burp
-            logging.logToOutput(
-                    "DEBUG: Registering ${getToolTypeName()} with Burp: ${getItemName(modelItem)}"
-            )
-            val registration = registerWithBurp(modelItem, burpItem)
-            if (registration != null) {
-                registrations[modelItem] = registration
-                logging.logToOutput(
-                        "DEBUG: Successfully registered ${getToolTypeName()}: ${getItemName(modelItem)}"
-                )
-                true
-            } else {
-                logging.logToError(
-                        "DEBUG: Failed to register ${getToolTypeName()}: ${getItemName(modelItem)} - registration returned null"
-                )
-                false
-            }
-        } catch (e: Exception) {
-            logging.logToError(
-                    "DEBUG: Error registering ${getToolTypeName()} '${getItemName(modelItem)}': ${e.message}"
-            )
-            e.printStackTrace()
-            false
-        }
-    }
-
-    /**
-     * Unregister a single tool
-     *
-     * @param modelItem The model item to unregister
-     * @return true if unregistration was successful
-     */
-    fun unregisterTool(modelItem: T): Boolean {
-        return try {
-            val registration = registrations.remove(modelItem)
-            if (registration != null) {
-                if (registration.isRegistered) {
-                    registration.deregister()
-                }
-                logging.logToOutput("Unregistered ${getToolTypeName()}: ${getItemName(modelItem)}")
-                true
-            } else {
-                logging.logToOutput(
-                        "${getToolTypeName()} was not registered: ${getItemName(modelItem)}"
-                )
-                true
-            }
-        } catch (e: Exception) {
-            logging.logToError(
-                    "Error unregistering ${getToolTypeName()} '${getItemName(modelItem)}': ${e.message}"
-            )
-            false
-        }
-    }
-
-    /**
-     * Register all tools from the configuration
-     *
-     * @param tools List of model items to register
-     * @return Number of successfully registered tools
-     */
-    fun registerAll(tools: List<T>): Int {
-        logging.logToOutput("DEBUG: RegisterAll called with ${tools.size} ${getToolTypeName()}s")
-        var successCount = 0
-        for (tool in tools) {
-            logging.logToOutput("DEBUG: Processing ${getToolTypeName()}: ${getItemName(tool)}")
-            if (registerTool(tool)) {
-                successCount++
-            }
-        }
-        logging.logToOutput(
-                "DEBUG: Registered $successCount of ${tools.size} ${getToolTypeName()}s"
-        )
-        return successCount
-    }
-
-    /**
-     * Unregister all currently registered tools
-     *
-     * @return Number of successfully unregistered tools
-     */
-    fun unregisterAll(): Int {
-        var successCount = 0
-        val toolsToUnregister = registrations.keys.toList()
-
-        for (tool in toolsToUnregister) {
-            if (unregisterTool(tool)) {
-                successCount++
-            }
-        }
-
-        logging.logToOutput("Unregistered $successCount ${getToolTypeName()}s")
-        return successCount
-    }
-
-    /**
-     * Refresh registrations - unregister all and re-register from current configuration
-     *
-     * @param tools List of model items to register
-     * @return Number of successfully registered tools after refresh
-     */
-    fun refreshRegistrations(tools: List<T>): Int {
-        logging.logToOutput("Refreshing ${getToolTypeName()} registrations...")
-        unregisterAll()
-        return registerAll(tools)
-    }
-
-    /** Get the count of currently registered tools */
-    fun getRegisteredCount(): Int {
-        return registrations.size
-    }
-
-    /** Check if a specific tool is registered */
-    fun isRegistered(modelItem: T): Boolean {
-        val registration = registrations[modelItem]
-        return registration?.isRegistered ?: false
-    }
-
-    /** Get all currently registered tools */
-    fun getRegisteredTools(): List<T> {
-        return registrations.keys.toList()
-    }
-
-    /** Get statistics about registrations */
-    fun getRegistrationStats(): Map<String, Any> {
-        return mapOf(
-                "toolType" to getToolTypeName(),
-                "registeredCount" to getRegisteredCount(),
-                "registrations" to registrations.keys.map { getItemName(it) }
-        )
-    }
-
-    /**
-     * Get the name of a model item for logging purposes Override this method if your model type
-     * doesn't have a standard "name" field
-     */
-    protected open fun getItemName(modelItem: T): String {
-        return when (modelItem) {
-            is Piper.MinimalTool -> modelItem.name
-            is Piper.HttpListener -> modelItem.common.name
-            is Piper.UserActionTool -> modelItem.common.name
-            is Piper.Commentator -> modelItem.common.name
-            is Piper.Highlighter -> modelItem.common.name
-            else -> modelItem.toString()
-        }
-    }
-
-    /**
-     * Validate a model item before registration Override this method to add custom validation logic
-     */
-    protected open fun validateModelItem(modelItem: T): List<String> {
-        val errors = mutableListOf<String>()
-
-        if (getItemName(modelItem).isBlank()) {
-            errors.add("Tool name cannot be empty")
-        }
-
-        return errors
-    }
-
-    /** Handle registration failure Override this method to add custom error handling */
-    protected open fun handleRegistrationFailure(modelItem: T, error: Exception) {
-        logging.logToError(
-                "Registration failed for ${getToolTypeName()} '${getItemName(modelItem)}': ${error.message}"
-        )
-    }
-
-    /** Cleanup resources when the manager is being destroyed */
-    fun cleanup() {
-        unregisterAll()
+        started = true
         registrations.clear()
+
+        for (index in 0 until model.size()) {
+            val item = model[index]
+            registrations.add(registerItem(item))
+        }
+
+        model.addListDataListener(this)
     }
 
-    /**
-     * Initialize the manager with a list of tools from configuration
-     *
-     * @param tools List of tools to process and register
-     * @return true if initialization was successful, false otherwise
-     */
-    fun initialize(tools: List<T>): Boolean {
+    /** Stop tracking the model and clean up registrations. */
+    fun stop() {
+        if (!started) return
+
+        model.removeListDataListener(this)
+        registrations.forEach { safeDeregister(it, null) }
+        registrations.clear()
+        started = false
+    }
+
+    /** Implemented by subclasses to describe the tool type for logging purposes. */
+    protected abstract fun toolTypeName(): String
+
+    /** Implemented by subclasses to determine whether the given model item should be enabled. */
+    protected abstract fun isModelItemEnabled(item: M): Boolean
+
+    /** Implemented by subclasses to perform the Montoya registration for the supplied item. */
+    protected abstract fun registerModelItem(item: M): Registration?
+
+    /** Allow subclasses to provide human readable names for log messages. */
+    protected open fun itemName(item: M): String = item.toString()
+
+    private fun registerItem(item: M): Registration? {
+        if (!isModelItemEnabled(item)) {
+            logging.logToOutput(
+                    "DEBUG: Skipping disabled ${toolTypeName()}: ${itemName(item)}"
+            )
+            return null
+        }
+
         return try {
-            logging.logToOutput(
-                    "DEBUG: Initializing ${getToolTypeName()} manager with ${tools.size} tools"
-            )
-            val result = registerAll(tools)
-            logging.logToOutput(
-                    "DEBUG: ${getToolTypeName()} manager initialization complete. Registered: ${getRegisteredCount()}/${tools.size}"
-            )
-            true
+            registerModelItem(item)?.also {
+                logging.logToOutput(
+                        "DEBUG: Registered ${toolTypeName()}: ${itemName(item)}"
+                )
+            }
         } catch (e: Exception) {
-            logging.logToError("Failed to initialize ${getToolTypeName()} manager: ${e.message}")
-            false
+            logging.logToError(
+                    "ERROR: Failed to register ${toolTypeName()} '${itemName(item)}': ${e.message}"
+            )
+            null
         }
     }
+
+    private fun safeDeregister(registration: Registration?, name: String?) {
+        if (registration == null) return
+
+        try {
+            if (registration.isRegistered) {
+                registration.deregister()
+                if (name != null) {
+                    logging.logToOutput(
+                            "DEBUG: Unregistered ${toolTypeName()}: $name"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            logging.logToError(
+                    "ERROR: Failed to deregister ${toolTypeName()} ${name ?: ""}: ${e.message}"
+            )
+        }
+    }
+
+    private fun calculateRange(event: ListDataEvent): IntRange? {
+        if (model.size() == 0) return null
+
+        val start = max(0, if (event.index0 < 0) 0 else event.index0)
+        val end = min(model.size() - 1, if (event.index1 < 0) model.size() - 1 else event.index1)
+
+        if (end < start) return null
+        return start..end
+    }
+
+    override fun contentsChanged(event: ListDataEvent) {
+        if (!started) return
+
+        val range = calculateRange(event) ?: return
+        for (index in range) {
+            val existing = registrations.getOrNull(index)
+            safeDeregister(existing, itemName(model[index]))
+            registrations[index] = registerItem(model[index])
+        }
+    }
+
+    override fun intervalAdded(event: ListDataEvent) {
+        if (!started) return
+
+        val range = calculateRange(event) ?: return
+        for (index in range) {
+            val registration = registerItem(model[index])
+            registrations.add(index, registration)
+        }
+    }
+
+    override fun intervalRemoved(event: ListDataEvent) {
+        if (!started) return
+
+        if (registrations.isEmpty()) return
+
+        val start = max(0, if (event.index0 < 0) 0 else event.index0)
+        val end = min(registrations.size - 1, if (event.index1 < 0) registrations.size - 1 else event.index1)
+
+        for (index in end downTo start) {
+            val existing = registrations.removeAt(index)
+            safeDeregister(existing, null)
+        }
+    }
+
+    /** Expose the currently tracked registrations for diagnostic purposes. */
+    fun currentRegistrations(): List<Registration?> = registrations.toList()
 }

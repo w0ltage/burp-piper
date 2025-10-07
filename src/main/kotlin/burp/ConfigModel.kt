@@ -37,9 +37,18 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
             pcs.firePropertyChange("developer", old, value)
         }
 
-    /** Get current configuration */
+    /** Get current configuration built from the Swing models */
     val config: Piper.Config
-        get() = _config
+        get() = serialize()
+
+    val enabledMessageViewers
+        get() = messageViewersModel.toIterable().filter { it.common.enabled }
+    val enabledMenuItems
+        get() = userActionToolsModel.toIterable().filter { it.common.enabled }
+    val enabledCommentators
+        get() = commentatorsModel.toIterable().filter { it.common.enabled }
+    val enabledHighlighters
+        get() = highlightersModel.toIterable().filter { it.common.enabled }
 
     /** Model collections for UI components */
     val macrosModel = javax.swing.DefaultListModel<Piper.MinimalTool>()
@@ -134,14 +143,15 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
         val targetPath = path ?: configPath ?: return false
 
         return try {
+            val currentConfig = serialize()
             when {
                 targetPath.toString().endsWith(".yaml", ignoreCase = true) ||
                         targetPath.toString().endsWith(".yml", ignoreCase = true) -> {
-                    val yamlContent = toYaml(_config)
+                    val yamlContent = toYaml(currentConfig)
                     File(targetPath.toString()).writeText(yamlContent)
                 }
                 targetPath.toString().endsWith(".pb", ignoreCase = true) -> {
-                    val bytes = _config.toByteArray()
+                    val bytes = currentConfig.toByteArray()
                     File(targetPath.toString()).writeBytes(bytes)
                 }
                 else -> {
@@ -288,7 +298,7 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
 
     /** Create a backup of current configuration */
     fun createBackup(): Piper.Config {
-        return _config.toBuilder().build()
+        return serialize().toBuilder().build()
     }
 
     /** Restore from backup */
@@ -298,17 +308,27 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
     }
 
     /** Convert configuration to YAML format */
-    private fun toYaml(config: Piper.Config): String {
-        // This would use the Serialization utilities to convert to YAML
-        // For now, delegating to the existing serialization logic
-        return toYaml(config)
-    }
+    private fun toYaml(config: Piper.Config): String = configToYaml(config)
 
     /** Convert YAML to configuration */
-    private fun fromYaml(yamlContent: String): Piper.Config {
-        // This would use the Serialization utilities to parse YAML
-        // For now, delegating to the existing serialization logic
-        return configFromYaml(yamlContent)
+    private fun fromYaml(yamlContent: String): Piper.Config = configFromYaml(yamlContent)
+
+    /** Build a Piper.Config instance from the current Swing models. */
+    fun serialize(): Piper.Config {
+        val serialized =
+                Piper.Config.newBuilder()
+                        .addAllMacro(macrosModel.toIterable())
+                        .addAllMessageViewer(messageViewersModel.toIterable())
+                        .addAllMenuItem(userActionToolsModel.toIterable())
+                        .addAllHttpListener(httpListenersModel.toIterable())
+                        .addAllCommentator(commentatorsModel.toIterable())
+                        .addAllIntruderPayloadProcessor(intruderPayloadProcessorsModel.toIterable())
+                        .addAllHighlighter(highlightersModel.toIterable())
+                        .addAllIntruderPayloadGenerator(intruderPayloadGeneratorsModel.toIterable())
+                        .setDeveloper(developer)
+                        .build()
+        _config = serialized
+        return serialized
     }
 
     companion object {

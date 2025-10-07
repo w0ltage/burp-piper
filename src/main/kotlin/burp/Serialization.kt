@@ -6,6 +6,8 @@ import java.io.InputStream
 import java.lang.RuntimeException
 import java.util.zip.DeflaterOutputStream
 import java.util.zip.InflaterInputStream
+import org.snakeyaml.engine.v1.api.Dump
+import org.snakeyaml.engine.v1.api.DumpSettingsBuilder
 import org.snakeyaml.engine.v1.api.Load
 import org.snakeyaml.engine.v1.api.LoadSettingsBuilder
 
@@ -274,6 +276,9 @@ fun Piper.Config.toSettings(): Map<String, Any> =
             add("highlighters", highlighterList, Piper.Highlighter::toMap)
             add("intruderPayloadGenerators", intruderPayloadGeneratorList, Piper.MinimalTool::toMap)
         }
+
+fun configToYaml(config: Piper.Config): String =
+        Dump(DumpSettingsBuilder().build()).dumpToString(config.toSettings())
 
 fun <E> MutableMap<String, Any>.add(key: String, value: List<E>, transform: (E) -> Any) {
     if (value.isNotEmpty()) this[key] = value.map(transform)
