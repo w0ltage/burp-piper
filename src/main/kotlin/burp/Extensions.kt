@@ -111,12 +111,14 @@ fun Piper.MinimalTool.canProcess(md: List<MessageInfo>, mims: MessageInfoMatchSt
         !this.hasFilter() || mims.predicate(md) { this.filter.matches(it, context) }
 
 fun Piper.MinimalTool.buildEnabled(value: Boolean? = null): Piper.MinimalTool {
-    val enabled = value ?: try {
-        this.cmd.checkDependencies()
-        true
-    } catch (_: DependencyException) {
-        false
-    }
+    val enabled = value ?: if (this.enabled) {
+        try {
+            this.cmd.checkDependencies()
+            true
+        } catch (_: DependencyException) {
+            false
+        }
+    } else false
     return toBuilder().setEnabled(enabled).build()
 }
 

@@ -2,14 +2,17 @@ package burp
 
 import com.redpois0n.terminal.JTerminal
 import java.awt.Component
+import java.io.IOException
 import javax.swing.JScrollPane
 import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
+import kotlin.text.Charsets
 
-abstract class Editor(private val tool: Piper.MessageViewer,
+abstract class Editor(protected val tool: Piper.MessageViewer,
                       protected val helpers: IExtensionHelpers,
-                      private val callbacks: IBurpExtenderCallbacks,
-                      private val context: PiperContext) : IMessageEditorTab {
+                      protected val callbacks: IBurpExtenderCallbacks,
+                      private val context: PiperContext,
+                      private val isEnabledSupplier: () -> Boolean) : IMessageEditorTab {
     private var msg: ByteArray? = null
 
     override fun getMessage(): ByteArray? = msg
@@ -17,6 +20,7 @@ abstract class Editor(private val tool: Piper.MessageViewer,
     override fun getTabCaption(): String = tool.common.name
 
     override fun isEnabled(content: ByteArray?, isRequest: Boolean): Boolean {
+        if (!isEnabledSupplier()) return false
         if (content == null || !tool.common.isInToolScope(isRequest)) return false
 
         val rr = RequestResponse.fromBoolean(isRequest)
@@ -38,7 +42,11 @@ abstract class Editor(private val tool: Piper.MessageViewer,
         if (content == null) return
         thread(start = true) {
             val input = getPayload(content, RequestResponse.fromBoolean(isRequest))
-            tool.common.cmd.execute(input).processOutput(this::outputProcessor)
+            try {
+                tool.common.cmd.execute(input).processOutput(this::outputProcessor)
+            } catch (e: IOException) {
+                handleExecutionFailure(e)
+            }
         }
     }
 
@@ -50,9 +58,20 @@ abstract class Editor(private val tool: Piper.MessageViewer,
 
     abstract override fun getSelectedData(): ByteArray
     abstract override fun getUiComponent(): Component
+
+    protected fun logToError(message: String) {
+        callbacks.stderr.write((message + "\n").toByteArray(Charsets.UTF_8))
+    }
+
+    protected open fun handleExecutionFailure(e: IOException) {
+        val message = "Failed to execute ${tool.common.cmd.commandLine}: ${e.message}"
+        logToError(message)
+    }
 }
 
-class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks, context: PiperContext) : Editor(tool, helpers, callbacks, context) {
+class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks,
+                     context: PiperContext, isEnabledSupplier: () -> Boolean) :
+        Editor(tool, helpers, callbacks, context, isEnabledSupplier) {
     private val terminal = JTerminal()
     private val scrollPane = JScrollPane()
 
@@ -75,10 +94,20 @@ class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, call
             }.start()
         }
     }
+    override fun handleExecutionFailure(e: IOException) {
+        val message = "Failed to execute ${tool.common.cmd.commandLine}: ${e.message}"
+        SwingUtilities.invokeLater {
+            terminal.text = ""
+            terminal.append("$message\n")
+        }
+        logToError(message)
+    }
 }
 
 class TextEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers,
-                 callbacks: IBurpExtenderCallbacks, context: PiperContext) : Editor(tool, helpers, callbacks, context) {
+                 callbacks: IBurpExtenderCallbacks, context: PiperContext,
+                 isEnabledSupplier: () -> Boolean) :
+        Editor(tool, helpers, callbacks, context, isEnabledSupplier) {
     private val editor = callbacks.createTextEditor()
 
     init {
@@ -93,5 +122,11 @@ class TextEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers,
             val bytes = it.readBytes()
             SwingUtilities.invokeLater { editor.text = bytes }
         }
+    }
+
+    override fun handleExecutionFailure(e: IOException) {
+        val message = "Failed to execute ${tool.common.cmd.commandLine}: ${e.message}"
+        SwingUtilities.invokeLater { editor.text = helpers.stringToBytes(message) }
+        logToError(message)
     }
 }
