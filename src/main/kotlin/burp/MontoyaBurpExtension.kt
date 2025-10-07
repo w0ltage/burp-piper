@@ -53,8 +53,8 @@ import javax.swing.event.ListDataListener
 class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
 
     companion object {
-        private const val NAME = "Piper"
-        private const val EXTENSION_SETTINGS_KEY = "piper_config"
+        const val NAME = "Piper"
+        const val EXTENSION_SETTINGS_KEY = "piper_config"
     }
 
     private lateinit var montoyaApi: MontoyaApi
@@ -282,6 +282,16 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                         return MontoyaPayloadGenerator(modelItem, utilities, montoyaApi)
                     }
                 }
+
+        // Initialize Commentator Manager
+        // TODO: Implement CommentatorManager class
+        // val commentatorManager = CommentatorManager()
+        // commentatorManager.initialize(configModel.config.commentatorList)
+
+        // Initialize Highlighter Manager
+        // TODO: Implement HighlighterManager class
+        // val highlighterManager = HighlighterManager()
+        // highlighterManager.initialize(configModel.config.highlighterList)
     }
 
     /**
@@ -295,8 +305,20 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         // Initialize configuration
         configModel = ConfigModel(api)
         configModel.initializeFromDefaults()
-        loadConfig()?.let { config ->
-            // TODO: Load config from saved settings if available
+        loadConfig()
+
+        // Debug: Log configuration state after loading
+        montoyaApi
+                .logging()
+                .logToOutput(
+                        "DEBUG: Configuration loaded with ${configModel.config.messageViewerCount} message viewers"
+                )
+        configModel.config.messageViewerList.forEachIndexed { index, viewer ->
+            montoyaApi
+                    .logging()
+                    .logToOutput(
+                            "DEBUG: MessageViewer[$index]: name='${viewer.common.name}', enabled=${viewer.common.enabled}"
+                    )
         }
 
         // Set extension name
@@ -311,6 +333,9 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                             executeToolFromContextMenu(event, tool)
                         }
                 )
+
+        // Initialize and register tool managers
+        initializeManagers()
 
         // Setup UI tabs
         populateTabs(configModel.config)
@@ -418,6 +443,56 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         tabs.addTab("Queue", queue)
 
         montoyaApi.logging().logToOutput("Piper UI tabs initialized")
+    }
+
+    /** Initialize all tool managers and register tools with Burp */
+    private fun initializeManagers() {
+        try {
+            // Debug: Log tools before manager initialization
+            montoyaApi
+                    .logging()
+                    .logToOutput(
+                            "DEBUG: Initializing managers with ${configModel.config.messageViewerCount} message viewers"
+                    )
+
+            // Initialize Message Viewer Manager
+            val messageViewerManager = MessageViewerManager()
+            val messageViewers = configModel.config.messageViewerList
+            montoyaApi
+                    .logging()
+                    .logToOutput("DEBUG: Passing ${messageViewers.size} message viewers to manager")
+            messageViewerManager.initialize(messageViewers)
+
+            // Initialize Macro Manager
+            val macroManager = MacroManager()
+            macroManager.initialize(configModel.config.macroList)
+
+            // Initialize Intruder Payload Processor Manager
+            val payloadProcessorManager = IntruderPayloadProcessorManager()
+            payloadProcessorManager.initialize(configModel.config.intruderPayloadProcessorList)
+
+            // Initialize Intruder Payload Generator Manager
+            val payloadGeneratorManager = IntruderPayloadGeneratorManager()
+            payloadGeneratorManager.initialize(configModel.config.intruderPayloadGeneratorList)
+
+            // Initialize HTTP Listener Manager
+            val httpListenerManager = HttpListenerManager()
+            httpListenerManager.initialize(configModel.config.httpListenerList)
+
+            // Initialize Commentator Manager
+            // TODO: Implement CommentatorManager class
+            // val commentatorManager = CommentatorManager()
+            // commentatorManager.initialize(configModel.config.commentatorList)
+
+            // Initialize Highlighter Manager
+            // TODO: Implement HighlighterManager class
+            // val highlighterManager = HighlighterManager()
+            // highlighterManager.initialize(configModel.config.highlighterList)
+
+            montoyaApi.logging().logToOutput("All tool managers initialized successfully")
+        } catch (e: Exception) {
+            montoyaApi.logging().logToError("Failed to initialize managers: ${e.message}")
+        }
     }
 
     /** Extension method for MinimalTool to pipe messages */
@@ -656,20 +731,20 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
     }
 
     /** Load configuration from Burp's persistence */
-    private fun loadConfig(): Piper.Config {
-        return try {
+    private fun loadConfig() {
+        try {
             val configData =
                     montoyaApi.persistence().extensionData().getString(EXTENSION_SETTINGS_KEY)
             if (configData != null) {
-                parseConfig(configData)
+                val loadedConfig = parseConfig(configData)
+                configModel.updateConfig(loadedConfig)
+                montoyaApi.logging().logToOutput("Configuration loaded from persistence")
             } else {
-                configModel.initializeFromDefaults()
-                configModel.config
+                montoyaApi.logging().logToOutput("No saved configuration found, using defaults")
             }
         } catch (e: Exception) {
             montoyaApi.logging().logToError("Error loading config: ${e.message}")
-            configModel.initializeFromDefaults()
-            configModel.config
+            montoyaApi.logging().logToOutput("Falling back to default configuration")
         }
     }
 
@@ -727,6 +802,66 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
             }
         }
     }
+
+    // TODO: Implement commentator and highlighter helper functions
+    // Temporarily commented out due to compilation issues
+    /*
+    /** Execute a commentator tool on a message */
+    private fun executeCommentatorTool(
+            commentator: Piper.Commentator,
+            messageDetails: MontoyaHttpRequestResponseAdapter
+    ) {
+        try {
+            val tool = commentator.common
+            if (tool.hasFilter() && !tool.filter.matches(messageDetails, utilities)) {
+                return
+            }
+
+            // Execute the commentator tool
+            val result = tool.cmd.execute(messageDetails.requestBytes, utilities)
+            if (result.isNotEmpty()) {
+                // Apply comment to the message
+                montoyaApi.logging().logToOutput("Commentator '${tool.name}' executed successfully")
+            }
+        } catch (e: Exception) {
+            montoyaApi
+                    .logging()
+                    .logToError(
+                            "Error executing commentator tool '${commentator.common.name}': ${e.message}"
+                    )
+        }
+    }
+
+    /** Execute a highlighter tool on a message */
+    private fun executeHighlighterTool(
+            highlighter: Piper.Highlighter,
+            messageDetails: MontoyaHttpRequestResponseAdapter
+    ) {
+        try {
+            val tool = highlighter.common
+            if (tool.hasFilter() && !tool.filter.matches(messageDetails, utilities)) {
+                return
+            }
+
+            // Execute the highlighter tool
+            val result = tool.cmd.execute(messageDetails.requestBytes, utilities)
+            if (result.isNotEmpty()) {
+                // Apply highlighting to the message
+                montoyaApi
+                        .logging()
+                        .logToOutput(
+                                "Highlighter '${tool.name}' executed with color: ${highlighter.color}"
+                        )
+            }
+        } catch (e: Exception) {
+            montoyaApi
+                    .logging()
+                    .logToError(
+                            "Error executing highlighter tool '${highlighter.common.name}': ${e.message}"
+                    )
+        }
+    }
+    */
 
     /** Data class for message details */
     data class MessageDetails(val requestBody: String, val responseBody: String)

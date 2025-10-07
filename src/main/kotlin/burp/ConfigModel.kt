@@ -77,6 +77,15 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
         }
     }
 
+    /** Update configuration with new config instance */
+    fun updateConfig(newConfig: Piper.Config) {
+        val oldConfig = _config
+        _config = newConfig
+        isDirty = true
+        pcs.firePropertyChange("config", oldConfig, newConfig)
+        montoyaApi.logging().logToOutput("Configuration updated")
+    }
+
     /** Load configuration from file */
     fun loadFromFile(path: Path): Boolean {
         return try {
@@ -137,12 +146,6 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
                     .logToError("Failed to save configuration to $targetPath: ${e.message}")
             false
         }
-    }
-
-    /** Update configuration */
-    fun updateConfig(newConfig: Piper.Config) {
-        _config = newConfig
-        isDirty = true
     }
 
     /** Check if configuration has been modified */
@@ -290,7 +293,7 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
     private fun fromYaml(yamlContent: String): Piper.Config {
         // This would use the Serialization utilities to parse YAML
         // For now, delegating to the existing serialization logic
-        return fromYaml(yamlContent)
+        return configFromYaml(yamlContent)
     }
 
     companion object {

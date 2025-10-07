@@ -27,7 +27,6 @@ abstract class MontoyaEditor(
         protected val montoyaApi: MontoyaApi
 ) {
     protected var currentMessage: MontoyaByteArray? = null
-    protected var isModified = false
 
     abstract fun getUiComponent(): Component
     abstract fun setRequestResponse(content: MontoyaByteArray?)
@@ -137,7 +136,6 @@ class MontoyaTextEditor(
 
     override fun setRequestResponse(content: MontoyaByteArray?) {
         currentMessage = content
-        isModified = false
 
         if (content == null) {
             textArea.text = ""
@@ -241,7 +239,6 @@ class MontoyaTerminalEditor(
 
     override fun setRequestResponse(content: MontoyaByteArray?) {
         currentMessage = content
-        isModified = false
 
         if (content == null) {
             terminal.text = ""

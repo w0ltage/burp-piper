@@ -65,6 +65,9 @@ fun minimalToolFromMap(source: Map<String, Any>): Piper.MinimalTool {
         b.scope = enumFromString(scope, Piper.MinimalTool.Scope::class.java)
     }
     source.copyStructured("filter", b::setFilter, ::messageMatchFromMap)
+    // Enable tools by default, allow YAML to explicitly disable with enabled: false
+    val enabled = source["enabled"] as? Boolean ?: true
+    b.setEnabled(enabled)
     return b.build()
 }
 
