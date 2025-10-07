@@ -331,8 +331,10 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         initializeManagers()
 
         // Setup UI tabs
-        populateTabs(configModel.config)
+        montoyaApi.logging().logToOutput("DEBUG: Setting up full UI tabs...")
+        setupFullUI(configModel, null)
         montoyaApi.userInterface().registerSuiteTab(NAME, tabs)
+        montoyaApi.logging().logToOutput("DEBUG: UI tabs registration complete")
 
         // Register main HTTP handler
         montoyaApi.http().registerHttpHandler(this)
@@ -424,8 +426,8 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         }
     }
 
-    /** Populate the UI tabs */
-    private fun populateTabs(config: Piper.Config) {
+    /** Populate minimal UI tabs (fallback) */
+    private fun populateMinimalTabs(config: Piper.Config) {
         tabs.removeAll()
 
         // Add configuration tab
@@ -435,7 +437,7 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
         // Add queue tab
         tabs.addTab("Queue", queue)
 
-        montoyaApi.logging().logToOutput("Piper UI tabs initialized")
+        montoyaApi.logging().logToOutput("Piper minimal UI tabs initialized")
     }
 
     /** Initialize all tool managers and register tools with Burp */
@@ -569,99 +571,118 @@ class MontoyaBurpExtension : BurpExtension, ListDataListener, HttpHandler {
                 process.inputStream.readBytes()
             }
 
-    /** Setup UI tabs */
-    private fun populateTabs(cfg: ConfigModel, parent: Component?) {
-        val switchToCommentator = { tabs.selectedIndex = 4 }
+    /** Setup full UI tabs with all tool management panels */
+    private fun setupFullUI(cfg: ConfigModel, parent: Component?) {
+        montoyaApi.logging().logToOutput("DEBUG: Starting full UI setup...")
 
-        tabs.addTab(
-                "Message viewers",
-                MessageViewerListEditor(
-                        cfg.messageViewersModel,
-                        parent,
-                        cfg.commentatorsModel,
-                        switchToCommentator
-                )
-        )
-        tabs.addTab(
-                "Context menu items",
-                MinimalToolListEditor(
-                        cfg.userActionToolsModel,
-                        parent,
-                        ::MenuItemDialog,
-                        Piper.UserActionTool::getDefaultInstance,
-                        UserActionToolFromMap,
-                        Piper.UserActionTool::toMap
-                )
-        )
-        tabs.addTab(
-                "Macros",
-                MinimalToolListEditor(
-                        cfg.macrosModel,
-                        parent,
-                        ::MacroDialog,
-                        Piper.MinimalTool::getDefaultInstance,
-                        ::minimalToolFromMap,
-                        Piper.MinimalTool::toMap
-                )
-        )
-        tabs.addTab(
-                "HTTP listeners",
-                MinimalToolListEditor(
-                        cfg.httpListenersModel,
-                        parent,
-                        ::HttpListenerDialog,
-                        Piper.HttpListener::getDefaultInstance,
-                        ::httpListenerFromMap,
-                        Piper.HttpListener::toMap
-                )
-        )
-        tabs.addTab(
-                "Commentators",
-                MinimalToolListEditor(
-                        cfg.commentatorsModel,
-                        parent,
-                        ::CommentatorDialog,
-                        Piper.Commentator::getDefaultInstance,
-                        ::commentatorFromMap,
-                        Piper.Commentator::toMap
-                )
-        )
-        tabs.addTab(
-                "Intruder payload processors",
-                MinimalToolListEditor(
-                        cfg.intruderPayloadProcessorsModel,
-                        parent,
-                        ::IntruderPayloadProcessorDialog,
-                        Piper.MinimalTool::getDefaultInstance,
-                        ::minimalToolFromMap,
-                        Piper.MinimalTool::toMap
-                )
-        )
-        tabs.addTab(
-                "Intruder payload generators",
-                MinimalToolListEditor(
-                        cfg.intruderPayloadGeneratorsModel,
-                        parent,
-                        ::IntruderPayloadGeneratorDialog,
-                        Piper.MinimalTool::getDefaultInstance,
-                        ::minimalToolFromMap,
-                        Piper.MinimalTool::toMap
-                )
-        )
-        tabs.addTab(
-                "Highlighters",
-                MinimalToolListEditor(
-                        cfg.highlightersModel,
-                        parent,
-                        ::HighlighterDialog,
-                        Piper.Highlighter::getDefaultInstance,
-                        ::highlighterFromMap,
-                        Piper.Highlighter::toMap
-                )
-        )
-        tabs.addTab("Queue", queue)
-        tabs.addTab("Load/Save configuration", createLoadSaveUI(cfg, parent))
-        tabs.addTab("Developer", createDeveloperUI(cfg))
+        try {
+            tabs.removeAll()
+            val switchToCommentator = { tabs.selectedIndex = 4 }
+
+            montoyaApi.logging().logToOutput("DEBUG: Adding Message viewers tab...")
+            tabs.addTab(
+                    "Message viewers",
+                    MessageViewerListEditor(
+                            cfg.messageViewersModel,
+                            parent,
+                            cfg.commentatorsModel,
+                            switchToCommentator
+                    )
+            )
+            tabs.addTab(
+                    "Context menu items",
+                    MinimalToolListEditor(
+                            cfg.userActionToolsModel,
+                            parent,
+                            ::MenuItemDialog,
+                            Piper.UserActionTool::getDefaultInstance,
+                            UserActionToolFromMap,
+                            Piper.UserActionTool::toMap
+                    )
+            )
+            tabs.addTab(
+                    "Macros",
+                    MinimalToolListEditor(
+                            cfg.macrosModel,
+                            parent,
+                            ::MacroDialog,
+                            Piper.MinimalTool::getDefaultInstance,
+                            ::minimalToolFromMap,
+                            Piper.MinimalTool::toMap
+                    )
+            )
+            tabs.addTab(
+                    "HTTP listeners",
+                    MinimalToolListEditor(
+                            cfg.httpListenersModel,
+                            parent,
+                            ::HttpListenerDialog,
+                            Piper.HttpListener::getDefaultInstance,
+                            ::httpListenerFromMap,
+                            Piper.HttpListener::toMap
+                    )
+            )
+            tabs.addTab(
+                    "Commentators",
+                    MinimalToolListEditor(
+                            cfg.commentatorsModel,
+                            parent,
+                            ::CommentatorDialog,
+                            Piper.Commentator::getDefaultInstance,
+                            ::commentatorFromMap,
+                            Piper.Commentator::toMap
+                    )
+            )
+            tabs.addTab(
+                    "Intruder payload processors",
+                    MinimalToolListEditor(
+                            cfg.intruderPayloadProcessorsModel,
+                            parent,
+                            ::IntruderPayloadProcessorDialog,
+                            Piper.MinimalTool::getDefaultInstance,
+                            ::minimalToolFromMap,
+                            Piper.MinimalTool::toMap
+                    )
+            )
+            tabs.addTab(
+                    "Intruder payload generators",
+                    MinimalToolListEditor(
+                            cfg.intruderPayloadGeneratorsModel,
+                            parent,
+                            ::IntruderPayloadGeneratorDialog,
+                            Piper.MinimalTool::getDefaultInstance,
+                            ::minimalToolFromMap,
+                            Piper.MinimalTool::toMap
+                    )
+            )
+            tabs.addTab(
+                    "Highlighters",
+                    MinimalToolListEditor(
+                            cfg.highlightersModel,
+                            parent,
+                            ::HighlighterDialog,
+                            Piper.Highlighter::getDefaultInstance,
+                            ::highlighterFromMap,
+                            Piper.Highlighter::toMap
+                    )
+            )
+            montoyaApi.logging().logToOutput("DEBUG: Adding Queue and config tabs...")
+            tabs.addTab("Queue", queue)
+            tabs.addTab("Load/Save configuration", createLoadSaveUI(cfg, parent))
+            tabs.addTab("Developer", createDeveloperUI(cfg))
+
+            montoyaApi
+                    .logging()
+                    .logToOutput("DEBUG: Full UI setup completed with ${tabs.tabCount} tabs")
+        } catch (e: Exception) {
+            montoyaApi
+                    .logging()
+                    .logToError(
+                            "ERROR: Failed to setup full UI, falling back to minimal UI: ${e.message}"
+                    )
+            e.printStackTrace()
+            populateMinimalTabs(cfg.config)
+        }
     }
 
     /** Create developer UI component */
