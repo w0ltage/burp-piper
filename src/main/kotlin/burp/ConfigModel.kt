@@ -56,6 +56,18 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
         pcs.addPropertyChangeListener(listener)
     }
 
+    /** Populate UI models from configuration */
+    fun fillModels(config: Piper.Config) {
+        fillDefaultModel(config.macroList, macrosModel)
+        fillDefaultModel(config.messageViewerList, messageViewersModel)
+        fillDefaultModel(config.menuItemList, userActionToolsModel)
+        fillDefaultModel(config.httpListenerList, httpListenersModel)
+        fillDefaultModel(config.commentatorList, commentatorsModel)
+        fillDefaultModel(config.intruderPayloadProcessorList, intruderPayloadProcessorsModel)
+        fillDefaultModel(config.highlighterList, highlightersModel)
+        fillDefaultModel(config.intruderPayloadGeneratorList, intruderPayloadGeneratorsModel)
+    }
+
     /** Initialize configuration from default YAML resources */
     fun initializeFromDefaults() {
         try {
@@ -63,6 +75,7 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
             if (defaultYamlResource != null) {
                 val yamlContent = defaultYamlResource.use { it.readBytes().decodeToString() }
                 _config = fromYaml(yamlContent)
+                fillModels(_config)
                 isDirty = false
                 montoyaApi.logging().logToOutput("Configuration initialized from defaults")
             } else {
@@ -81,6 +94,7 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
     fun updateConfig(newConfig: Piper.Config) {
         val oldConfig = _config
         _config = newConfig
+        fillModels(_config)
         isDirty = true
         pcs.firePropertyChange("config", oldConfig, newConfig)
         montoyaApi.logging().logToOutput("Configuration updated")
@@ -105,6 +119,7 @@ class ConfigModel(private val montoyaApi: MontoyaApi) {
                     return false
                 }
             }
+            fillModels(_config)
             isDirty = false
             montoyaApi.logging().logToOutput("Configuration loaded from: $path")
             true
