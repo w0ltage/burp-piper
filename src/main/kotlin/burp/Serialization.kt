@@ -73,12 +73,17 @@ fun httpListenerFromMap(source: Map<String, Any>): Piper.HttpListener {
 }
 
 fun commandInvocationFromMap(source: Map<String, Any>): Piper.CommandInvocation {
+    val dependencies = source.stringSequence("requiredInPath", required = false).toMutableList()
+    val tags = source.stringSequence("tags", required = false)
+    if (tags.any()) {
+        dependencies += tags.map { GENERATOR_TAG_PREFIX + it }
+    }
     val b = Piper.CommandInvocation.newBuilder()!!
             .addAllPrefix(source.stringSequence("prefix"))
             .addAllPostfix(source.stringSequence("postfix", required = false))
             .setInputMethod(enumFromString(source.stringOrDie("inputMethod"),
                     Piper.CommandInvocation.InputMethod::class.java))
-            .addAllRequiredInPath(source.stringSequence("requiredInPath", required = false))
+            .addAllRequiredInPath(dependencies)
             .addAllExitCode(source.intSequence("exitCode"))
     with(source) {
         copyBooleanFlag("passHeaders", b::setPassHeaders)
@@ -329,7 +334,14 @@ fun Piper.CommandInvocation.toMap(): MutableMap<String, Any> {
     if (this.postfixCount > 0) m["postfix"] = this.postfixList
     m["inputMethod"] = this.inputMethod.name.toLowerCase()
     if (this.passHeaders) m["passHeaders"] = true
-    if (this.requiredInPathCount > 0) m["requiredInPath"] = this.requiredInPathList
+    val dependencies = this.extractDependencies()
+    if (dependencies.isNotEmpty()) {
+        m["requiredInPath"] = dependencies
+    }
+    val tags = this.extractTags()
+    if (tags.isNotEmpty()) {
+        m["tags"] = tags
+    }
     if (this.exitCodeCount > 0) m["exitCode"] = this.exitCodeList
     if (this.hasStdout()) m["stdout"] = this.stdout.toMap()
     if (this.hasStderr()) m["stderr"] = this.stderr.toMap()
