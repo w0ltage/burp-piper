@@ -3,7 +3,6 @@ package burp
 import org.snakeyaml.engine.v1.api.Dump
 import org.snakeyaml.engine.v1.api.DumpSettingsBuilder
 import java.awt.BorderLayout
-import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
@@ -45,6 +44,7 @@ import javax.swing.JTable
 import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.JToggleButton
+import javax.swing.UIManager
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 import javax.swing.SwingWorker
@@ -70,7 +70,6 @@ data class GeneratorEditorState(
     var passHeaders: Boolean = false,
     var exitCodes: MutableList<Int> = mutableListOf(),
     var dependencies: MutableList<String> = mutableListOf(),
-    var securitySandbox: Boolean = false,
 )
 
 data class ParameterState(
@@ -188,7 +187,6 @@ private object GeneratorTemplates {
             target.exitCodes = state.exitCodes.map { it }.toMutableList()
             target.dependencies = state.dependencies.map { it }.toMutableList()
             target.passHeaders = state.passHeaders
-            target.securitySandbox = state.securitySandbox
         }
         userDefined += template
     }
@@ -464,7 +462,6 @@ private class GeneratorEditorPanel(
     private val historyTab = HistoryPanel()
     private lateinit var validationTab: ValidationTestPanel
     private lateinit var parametersTab: ParameterEditorPanel
-    private val securityTab = SecurityPanel { markDirty() }
     private val saveButton = JButton("Save")
     private val saveTemplateButton = JButton("Save as template")
     private val exportButton = JButton("Copy YAML")
@@ -511,7 +508,6 @@ private class GeneratorEditorPanel(
         tabbedPane.addTab("Parameters", parametersTab)
         tabbedPane.addTab("Input / Method", inputTab)
         tabbedPane.addTab("Validation & Test", validationTab)
-        tabbedPane.addTab("Security & Env", securityTab)
         tabbedPane.addTab("History & Logs", historyTab)
         add(tabbedPane, BorderLayout.CENTER)
 
@@ -548,7 +544,6 @@ private class GeneratorEditorPanel(
                 inputTab.setInputMethod(Piper.CommandInvocation.InputMethod.STDIN, emptyList(), false)
                 validationTab.reset()
                 validationTab.updateParameterInputs(emptyList())
-                securityTab.setDependencies(emptyList(), false)
                 overviewTab.updateOverview(null)
                 historyTab.clear()
                 saveButton.isEnabled = false
@@ -562,7 +557,6 @@ private class GeneratorEditorPanel(
             validationTab.updateParameterInputs(newState.parameters)
             inputTab.setInputMethod(newState.inputMethod, newState.exitCodes, newState.passHeaders)
             validationTab.reset()
-            securityTab.setDependencies(newState.dependencies, newState.securitySandbox)
             overviewTab.updateOverview(newState)
             historyTab.clear()
             populateTemplates(newState.templateId)
@@ -605,9 +599,6 @@ private class GeneratorEditorPanel(
         current.inputMethod = inputConfig.method
         current.exitCodes = inputConfig.exitCodes.toMutableList()
         current.passHeaders = inputConfig.passHeaders
-        val securityConfig = securityTab.snapshot()
-        current.dependencies = securityConfig.dependencies.toMutableList()
-        current.securitySandbox = securityConfig.sandbox
         overviewTab.updateOverview(current)
         state = current
         return current
@@ -664,15 +655,35 @@ private class GeneratorEditorPanel(
 }
 
 private class OverviewPanel : JPanel(BorderLayout()) {
+    private val titleLabel = JLabel("Generator summary")
     private val summaryArea = JTextArea()
 
     init {
+        border = EmptyBorder(12, 12, 12, 12)
+
+        val container = JPanel()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        container.isOpaque = false
+
+        titleLabel.font = titleLabel.font.deriveFont(Font.BOLD)
+        titleLabel.alignmentX = Component.LEFT_ALIGNMENT
+        container.add(titleLabel)
+        container.add(Box.createVerticalStrut(8))
+
         summaryArea.isEditable = false
-        summaryArea.background = Color(0xF4, 0xF6, 0xFB)
-        summaryArea.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        summaryArea.isOpaque = false
         summaryArea.lineWrap = true
         summaryArea.wrapStyleWord = true
-        add(JScrollPane(summaryArea), BorderLayout.CENTER)
+        summaryArea.border = null
+        UIManager.getFont("Label.font")?.let(summaryArea::setFont)
+        UIManager.getColor("Label.foreground")?.let(summaryArea::setForeground)
+        summaryArea.alignmentX = Component.LEFT_ALIGNMENT
+        container.add(summaryArea)
+
+        val wrapper = JPanel(BorderLayout())
+        wrapper.isOpaque = false
+        wrapper.add(container, BorderLayout.NORTH)
+        add(wrapper, BorderLayout.CENTER)
     }
 
     fun updateOverview(state: GeneratorEditorState?) {
@@ -1080,69 +1091,6 @@ private class InputMethodPanel(
     }
 }
 
-private data class SecuritySnapshot(
-    val dependencies: List<String>,
-    val sandbox: Boolean,
-)
-
-private class SecurityPanel(
-    private val onChange: () -> Unit,
-) : JPanel(BorderLayout()) {
-
-    private val dependencyModel = DefaultListModel<String>()
-    private val dependencyList = JList(dependencyModel)
-    private val sandboxBox = JCheckBox("Run via sandbox wrapper (configure in Piper settings)")
-
-    init {
-        border = EmptyBorder(8, 8, 8, 8)
-        val notice = JLabel("Security: This generator executes external code. Prefer signed templates or sandboxing.")
-        notice.foreground = Color(0x99, 0x33, 0x33)
-        add(notice, BorderLayout.NORTH)
-        add(JScrollPane(dependencyList), BorderLayout.CENTER)
-
-        val footer = JPanel()
-        footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
-        val buttonRow = JPanel()
-        buttonRow.layout = BoxLayout(buttonRow, BoxLayout.X_AXIS)
-        val addButton = JButton("Add required binary")
-        addButton.addActionListener {
-            val value = JOptionPane.showInputDialog(this, "Executable name or path") ?: return@addActionListener
-            if (value.isNotBlank()) {
-                dependencyModel.addElement(value.trim())
-                onChange()
-            }
-        }
-        val removeButton = JButton("Remove")
-        removeButton.addActionListener {
-            val idx = dependencyList.selectedIndex
-            if (idx >= 0) {
-                dependencyModel.remove(idx)
-                onChange()
-            }
-        }
-        buttonRow.add(addButton)
-        buttonRow.add(Box.createRigidArea(Dimension(4, 0)))
-        buttonRow.add(removeButton)
-        buttonRow.add(Box.createHorizontalGlue())
-        footer.add(buttonRow)
-        footer.add(Box.createRigidArea(Dimension(0, 6)))
-        sandboxBox.addActionListener { onChange() }
-        footer.add(sandboxBox)
-        add(footer, BorderLayout.SOUTH)
-    }
-
-    fun setDependencies(dependencies: List<String>, sandbox: Boolean) {
-        dependencyModel.clear()
-        dependencies.forEach(dependencyModel::addElement)
-        sandboxBox.isSelected = sandbox
-    }
-
-    fun snapshot(): SecuritySnapshot = SecuritySnapshot(
-        dependencies = (0 until dependencyModel.size()).map(dependencyModel::getElementAt),
-        sandbox = sandboxBox.isSelected,
-    )
-}
-
 private class ValidationTestPanel(
     private val parent: Component?,
     private val toolSupplier: () -> Piper.MinimalTool?,
@@ -1427,6 +1375,5 @@ private fun GeneratorEditorState.deepCopy(): GeneratorEditorState {
     copy.passHeaders = passHeaders
     copy.exitCodes = exitCodes.map { it }.toMutableList()
     copy.dependencies = dependencies.map { it }.toMutableList()
-    copy.securitySandbox = securitySandbox
     return copy
 }
