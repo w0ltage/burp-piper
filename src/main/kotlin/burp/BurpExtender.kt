@@ -345,35 +345,9 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         }
 
     private fun populateTabs(cfg: ConfigModel, parent: Component?) {
-        val switchToCommentator = { tabs.selectedIndex = 4 }
-
-        tabs.addTab("Message viewers", MessageViewerListEditor(cfg.messageViewersModel, parent,
-                cfg.commentatorsModel, switchToCommentator))
-        tabs.addTab("Context menu items", MinimalToolListEditor(cfg.menuItemsModel, parent,
-                ::MenuItemDialog, Piper.UserActionTool::getDefaultInstance, UserActionToolFromMap, Piper.UserActionTool::toMap))
-        tabs.addTab("Macros", MinimalToolListEditor(cfg.macrosModel, parent,
-                ::MacroDialog, Piper.MinimalTool::getDefaultInstance, ::minimalToolFromMap, Piper.MinimalTool::toMap))
-        tabs.addTab("HTTP listeners", MinimalToolListEditor(cfg.httpListenersModel, parent,
-                ::HttpListenerDialog, Piper.HttpListener::getDefaultInstance, ::httpListenerFromMap, Piper.HttpListener::toMap))
-        tabs.addTab("Commentators", MinimalToolListEditor(cfg.commentatorsModel, parent,
-                ::CommentatorDialog, Piper.Commentator::getDefaultInstance, ::commentatorFromMap, Piper.Commentator::toMap))
-        tabs.addTab("Intruder payload processors", MinimalToolListEditor(cfg.intruderPayloadProcessorsModel, parent,
-                ::IntruderPayloadProcessorDialog, Piper.MinimalTool::getDefaultInstance, ::minimalToolFromMap, Piper.MinimalTool::toMap))
-        tabs.addTab("Intruder payload generators", MinimalToolListEditor(cfg.intruderPayloadGeneratorsModel, parent,
-                ::IntruderPayloadGeneratorDialog, Piper.MinimalTool::getDefaultInstance, ::minimalToolFromMap, Piper.MinimalTool::toMap))
-        tabs.addTab("Highlighters", MinimalToolListEditor(cfg.highlightersModel, parent,
-                ::HighlighterDialog, Piper.Highlighter::getDefaultInstance, ::highlighterFromMap, Piper.Highlighter::toMap))
-        tabs.addTab("Queue", queue)
-        tabs.addTab("Load/Save configuration", createLoadSaveUI(cfg, parent))
-        tabs.addTab("Developer", createDeveloperUI(cfg))
+        tabs.removeAll()
+        populatePiperTabs(tabs, cfg, parent) { queue }
     }
-
-    private fun createDeveloperUI(cfg: ConfigModel): Component =
-            JCheckBox("show user interface elements suited for developers").apply {
-                isSelected = cfg.developer
-                cfg.addPropertyChangeListener({ isSelected = cfg.developer })
-                addChangeListener { cfg.developer = isSelected }
-            }
 
     // ITab members
     override fun getTabCaption(): String = NAME
@@ -767,7 +741,7 @@ class ConfigModel(config: Piper.Config = Piper.Config.getDefaultInstance()) {
             .build()
 }
 
-private fun createLoadSaveUI(cfg: ConfigModel, parent: Component?): Component {
+fun createLoadSaveUI(cfg: ConfigModel, parent: Component?): Component {
     return JPanel().apply {
         add(JButton("Load/restore default config").apply {
             addActionListener {

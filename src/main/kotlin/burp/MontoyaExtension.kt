@@ -12,6 +12,7 @@ import burp.api.montoya.intruder.PayloadGeneratorProvider
 import burp.api.montoya.intruder.PayloadProcessingResult
 import burp.api.montoya.intruder.PayloadProcessor
 import burp.api.montoya.utilities.ByteUtils
+import java.awt.BorderLayout
 import java.io.BufferedReader
 import java.io.File
 import java.net.URL
@@ -19,6 +20,9 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.text.Charsets
 import javax.swing.DefaultListModel
+import javax.swing.JTabbedPane
+import javax.swing.JLabel
+import javax.swing.JPanel
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 
@@ -30,9 +34,19 @@ class MontoyaExtension : BurpExtension {
     private lateinit var processorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var generatorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
 
+    private val saveOnChangeListener = object : ListDataListener {
+        override fun contentsChanged(e: ListDataEvent) = saveConfig()
+        override fun intervalAdded(e: ListDataEvent) = saveConfig()
+        override fun intervalRemoved(e: ListDataEvent) = saveConfig()
+    }
+
+    private lateinit var suiteTabs: JTabbedPane
+    private var suiteTabRegistration: Registration? = null
+
     override fun initialize(api: MontoyaApi) {
         this.api = api
         api.extension().setName(NAME)
+        api.logging().logToOutput("Initializing Piper extension")
 
         context = object : PiperContext {
             private val byteUtils: ByteUtils = api.utilities().byteUtils()
@@ -42,6 +56,15 @@ class MontoyaExtension : BurpExtension {
         }
 
         configModel = ConfigModel(loadConfig())
+
+        listOf(
+            configModel.menuItemsModel,
+            configModel.commentatorsModel,
+            configModel.highlightersModel,
+            configModel.messageViewersModel,
+            configModel.macrosModel,
+            configModel.httpListenersModel,
+        ).forEach { it.addListDataListener(saveOnChangeListener) }
 
         processorManager = MontoyaRegisteredToolManager(
             configModel.intruderPayloadProcessorsModel,
@@ -54,6 +77,18 @@ class MontoyaExtension : BurpExtension {
             { it.enabled },
             { registerPayloadGenerator(it) }
         )
+
+        val queuePlaceholder = JPanel(BorderLayout()).apply {
+            add(
+                JLabel("Queue processing is available when using the legacy Burp Extender API."),
+                BorderLayout.NORTH,
+            )
+        }
+
+        suiteTabs = JTabbedPane()
+        populatePiperTabs(suiteTabs, configModel, parent = null) { queuePlaceholder }
+        suiteTabRegistration = api.userInterface().registerSuiteTab(NAME, suiteTabs)
+        api.logging().logToOutput("Piper suite tab registered")
 
         configModel.addPropertyChangeListener { saveConfig() }
     }
