@@ -3,7 +3,7 @@ package burp
 import org.snakeyaml.engine.v1.api.Dump
 import org.snakeyaml.engine.v1.api.DumpSettingsBuilder
 import java.awt.BorderLayout
-import java.awt.CardLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
@@ -46,10 +46,8 @@ import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.JToggleButton
 import javax.swing.ListSelectionModel
-import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.SwingWorker
-import javax.swing.UIManager
 import javax.swing.border.EmptyBorder
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -72,6 +70,7 @@ data class GeneratorEditorState(
     var passHeaders: Boolean = false,
     var exitCodes: MutableList<Int> = mutableListOf(),
     var dependencies: MutableList<String> = mutableListOf(),
+    var securitySandbox: Boolean = false,
 )
 
 data class ParameterState(
@@ -189,6 +188,7 @@ private object GeneratorTemplates {
             target.exitCodes = state.exitCodes.map { it }.toMutableList()
             target.dependencies = state.dependencies.map { it }.toMutableList()
             target.passHeaders = state.passHeaders
+            target.securitySandbox = state.securitySandbox
         }
         userDefined += template
     }
@@ -464,6 +464,7 @@ private class GeneratorEditorPanel(
     private val historyTab = HistoryPanel()
     private lateinit var validationTab: ValidationTestPanel
     private lateinit var parametersTab: ParameterEditorPanel
+    private val securityTab = SecurityPanel { markDirty() }
     private val saveButton = JButton("Save")
     private val saveTemplateButton = JButton("Save as template")
     private val exportButton = JButton("Copy YAML")
@@ -510,6 +511,7 @@ private class GeneratorEditorPanel(
         tabbedPane.addTab("Parameters", parametersTab)
         tabbedPane.addTab("Input / Method", inputTab)
         tabbedPane.addTab("Validation & Test", validationTab)
+        tabbedPane.addTab("Security & Env", securityTab)
         tabbedPane.addTab("History & Logs", historyTab)
         add(tabbedPane, BorderLayout.CENTER)
 
@@ -546,6 +548,7 @@ private class GeneratorEditorPanel(
                 inputTab.setInputMethod(Piper.CommandInvocation.InputMethod.STDIN, emptyList(), false)
                 validationTab.reset()
                 validationTab.updateParameterInputs(emptyList())
+                securityTab.setDependencies(emptyList(), false)
                 overviewTab.updateOverview(null)
                 historyTab.clear()
                 saveButton.isEnabled = false
@@ -559,6 +562,7 @@ private class GeneratorEditorPanel(
             validationTab.updateParameterInputs(newState.parameters)
             inputTab.setInputMethod(newState.inputMethod, newState.exitCodes, newState.passHeaders)
             validationTab.reset()
+            securityTab.setDependencies(newState.dependencies, newState.securitySandbox)
             overviewTab.updateOverview(newState)
             historyTab.clear()
             populateTemplates(newState.templateId)
@@ -601,6 +605,9 @@ private class GeneratorEditorPanel(
         current.inputMethod = inputConfig.method
         current.exitCodes = inputConfig.exitCodes.toMutableList()
         current.passHeaders = inputConfig.passHeaders
+        val securityConfig = securityTab.snapshot()
+        current.dependencies = securityConfig.dependencies.toMutableList()
+        current.securitySandbox = securityConfig.sandbox
         overviewTab.updateOverview(current)
         state = current
         return current
@@ -656,141 +663,42 @@ private class GeneratorEditorPanel(
     }
 }
 
-private class OverviewPanel : JPanel(CardLayout()) {
-    private val cardLayout = layout as CardLayout
-    private val emptyLabel = JLabel("Select or create a generator to get started.")
-    private val nameValue = JLabel()
-    private val statusValue = JLabel()
-    private val templateValue = JLabel()
-    private val tagsValue = JLabel()
-    private val commandValue = JLabel()
-    private val inputMethodValue = JLabel()
-    private val parametersValue = JLabel()
-    private val dependenciesValue = JLabel()
-    private val exitCodesValue = JLabel()
+private class OverviewPanel : JPanel(BorderLayout()) {
+    private val summaryArea = JTextArea()
 
     init {
-        isOpaque = false
-        border = EmptyBorder(12, 12, 12, 12)
-
-        val emptyPanel = JPanel(BorderLayout())
-        emptyPanel.isOpaque = false
-        emptyLabel.foreground = UIManager.getColor("Label.disabledForeground") ?: emptyLabel.foreground
-        emptyPanel.add(emptyLabel, BorderLayout.NORTH)
-        add(emptyPanel, "empty")
-
-        val detailPanel = JPanel(GridBagLayout())
-        detailPanel.isOpaque = false
-        var row = 0
-        fun addRow(title: String, valueLabel: JLabel) {
-            val titleLabel = JLabel("$title:")
-            titleLabel.font = titleLabel.font.deriveFont(Font.BOLD)
-            val titleConstraints = GridBagConstraints().apply {
-                gridx = 0
-                gridy = row
-                anchor = GridBagConstraints.NORTHWEST
-                insets = Insets(if (row == 0) 0 else 6, 0, 0, 12)
-            }
-            detailPanel.add(titleLabel, titleConstraints)
-
-            valueLabel.verticalAlignment = SwingConstants.TOP
-            val valueConstraints = GridBagConstraints().apply {
-                gridx = 1
-                gridy = row
-                weightx = 1.0
-                fill = GridBagConstraints.HORIZONTAL
-                anchor = GridBagConstraints.NORTHWEST
-                insets = Insets(if (row == 0) 0 else 6, 0, 0, 0)
-            }
-            detailPanel.add(valueLabel, valueConstraints)
-            row++
-        }
-
-        listOf(
-            "Name" to nameValue,
-            "Status" to statusValue,
-            "Template" to templateValue,
-            "Tags" to tagsValue,
-            "Command" to commandValue,
-            "Input method" to inputMethodValue,
-            "Parameters" to parametersValue,
-            "Required binaries" to dependenciesValue,
-            "Success exit codes" to exitCodesValue,
-        ).forEach { (title, label) -> addRow(title, label) }
-
-        val filler = JPanel()
-        filler.isOpaque = false
-        val fillerConstraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = row
-            gridwidth = 2
-            weighty = 1.0
-            fill = GridBagConstraints.BOTH
-        }
-        detailPanel.add(filler, fillerConstraints)
-
-        add(detailPanel, "details")
-        cardLayout.show(this, "empty")
+        summaryArea.isEditable = false
+        summaryArea.background = Color(0xF4, 0xF6, 0xFB)
+        summaryArea.border = BorderFactory.createEmptyBorder(8, 8, 8, 8)
+        summaryArea.lineWrap = true
+        summaryArea.wrapStyleWord = true
+        add(JScrollPane(summaryArea), BorderLayout.CENTER)
     }
 
     fun updateOverview(state: GeneratorEditorState?) {
         if (state == null) {
-            cardLayout.show(this, "empty")
+            summaryArea.text = "Select or create a generator to get started."
             return
         }
-        nameValue.setValueText(state.name, "(unnamed)")
-        statusValue.setValueText(if (state.enabled) "Enabled" else "Disabled")
-        val templateLabel = state.templateId?.let { id ->
-            GeneratorTemplates.all().firstOrNull { it.id == id }?.name ?: "Custom"
-        } ?: "Custom"
-        templateValue.setValueText(templateLabel, templateLabel)
-        tagsValue.setValueText(formatList(state.tags))
-        commandValue.setValueText(state.commandTokens.joinToString(" ").ifBlank { "Not configured" })
-        inputMethodValue.setValueText(formatInputMethod(state))
-        parametersValue.setValueText(formatParameters(state.parameters))
-        dependenciesValue.setValueText(formatList(state.dependencies))
-        exitCodesValue.setValueText(formatExitCodes(state.exitCodes))
-        cardLayout.show(this, "details")
-    }
-
-    private fun JLabel.setValueText(value: String, emptyPlaceholder: String = "None") {
-        val display = if (value.isBlank()) emptyPlaceholder else value
-        text = "<html>${display.htmlEscape().replace("\\n", "<br>")}</html>"
-        toolTipText = if (display.length > 60 || display.contains('\n')) display else null
-    }
-
-    private fun formatList(values: List<String>, emptyPlaceholder: String = "None"): String =
-        if (values.isEmpty()) emptyPlaceholder else values.joinToString(", ")
-
-    private fun formatParameters(values: List<ParameterState>): String {
-        if (values.isEmpty()) return "None"
-        return values.joinToString("\\n") { param ->
-            val label = param.label.ifBlank { param.name }
-            val requirement = if (param.required) "required" else "optional"
-            "$label – ${param.name} (${param.type.name.lowercase()}, $requirement)"
+        summaryArea.text = buildString {
+            appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
+            appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
+            if (state.tags.isNotEmpty()) {
+                appendLine("Tags: ${state.tags.joinToString(", ")}")
+            }
+            appendLine("Command: ${state.commandTokens.joinToString(" ")}")
+            appendLine("Input method: ${state.inputMethod.name}")
+            if (state.parameters.isNotEmpty()) {
+                appendLine("Parameters: ${state.parameters.joinToString { "${it.name} (${it.type.name.lowercase()})" }}")
+            }
+            if (state.dependencies.isNotEmpty()) {
+                appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
+            }
+            if (state.exitCodes.isNotEmpty()) {
+                appendLine("Success exit codes: ${state.exitCodes.joinToString(", ")}")
+            }
         }
     }
-
-    private fun formatInputMethod(state: GeneratorEditorState): String {
-        val methodLabel = when (state.inputMethod) {
-            Piper.CommandInvocation.InputMethod.STDIN -> "Standard input"
-            Piper.CommandInvocation.InputMethod.FILENAME -> "Temporary file"
-            else -> state.inputMethod.name.lowercase().replace('_', ' ')
-        }
-        val extras = mutableListOf<String>()
-        if (state.passHeaders) {
-            extras += "passes HTTP headers"
-        }
-        return if (extras.isEmpty()) methodLabel else "$methodLabel (${extras.joinToString(", ")})"
-    }
-
-    private fun formatExitCodes(values: List<Int>): String =
-        if (values.isEmpty()) "Default (0)" else values.joinToString(", ")
-
-    private fun String.htmlEscape(): String =
-        this.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
 }
 
 private class CommandEditorPanel(
@@ -1172,6 +1080,69 @@ private class InputMethodPanel(
     }
 }
 
+private data class SecuritySnapshot(
+    val dependencies: List<String>,
+    val sandbox: Boolean,
+)
+
+private class SecurityPanel(
+    private val onChange: () -> Unit,
+) : JPanel(BorderLayout()) {
+
+    private val dependencyModel = DefaultListModel<String>()
+    private val dependencyList = JList(dependencyModel)
+    private val sandboxBox = JCheckBox("Run via sandbox wrapper (configure in Piper settings)")
+
+    init {
+        border = EmptyBorder(8, 8, 8, 8)
+        val notice = JLabel("Security: This generator executes external code. Prefer signed templates or sandboxing.")
+        notice.foreground = Color(0x99, 0x33, 0x33)
+        add(notice, BorderLayout.NORTH)
+        add(JScrollPane(dependencyList), BorderLayout.CENTER)
+
+        val footer = JPanel()
+        footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
+        val buttonRow = JPanel()
+        buttonRow.layout = BoxLayout(buttonRow, BoxLayout.X_AXIS)
+        val addButton = JButton("Add required binary")
+        addButton.addActionListener {
+            val value = JOptionPane.showInputDialog(this, "Executable name or path") ?: return@addActionListener
+            if (value.isNotBlank()) {
+                dependencyModel.addElement(value.trim())
+                onChange()
+            }
+        }
+        val removeButton = JButton("Remove")
+        removeButton.addActionListener {
+            val idx = dependencyList.selectedIndex
+            if (idx >= 0) {
+                dependencyModel.remove(idx)
+                onChange()
+            }
+        }
+        buttonRow.add(addButton)
+        buttonRow.add(Box.createRigidArea(Dimension(4, 0)))
+        buttonRow.add(removeButton)
+        buttonRow.add(Box.createHorizontalGlue())
+        footer.add(buttonRow)
+        footer.add(Box.createRigidArea(Dimension(0, 6)))
+        sandboxBox.addActionListener { onChange() }
+        footer.add(sandboxBox)
+        add(footer, BorderLayout.SOUTH)
+    }
+
+    fun setDependencies(dependencies: List<String>, sandbox: Boolean) {
+        dependencyModel.clear()
+        dependencies.forEach(dependencyModel::addElement)
+        sandboxBox.isSelected = sandbox
+    }
+
+    fun snapshot(): SecuritySnapshot = SecuritySnapshot(
+        dependencies = (0 until dependencyModel.size()).map(dependencyModel::getElementAt),
+        sandbox = sandboxBox.isSelected,
+    )
+}
+
 private class ValidationTestPanel(
     private val parent: Component?,
     private val toolSupplier: () -> Piper.MinimalTool?,
@@ -1456,5 +1427,6 @@ private fun GeneratorEditorState.deepCopy(): GeneratorEditorState {
     copy.passHeaders = passHeaders
     copy.exitCodes = exitCodes.map { it }.toMutableList()
     copy.dependencies = dependencies.map { it }.toMutableList()
+    copy.securitySandbox = securitySandbox
     return copy
 }
