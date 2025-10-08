@@ -652,6 +652,7 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
         if (hasFileName) yield(null)
         yieldAll(ci.postfixList)
     }.map(::CommandLineParameter))
+    private val parameterEditor = CommandParameterListEditor(ci.parameterList, this)
 
     fun parseExitCodeList(): Iterable<Int> {
         val text = tfExitCode!!.text
@@ -775,6 +776,8 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
 
         InputMethodWidget.create(this, panel, cs, hasFileName, paramsModel)
 
+        addFullWidthComponent(parameterEditor, panel, cs)
+
         cbPassHeaders = if (showPassHeaders) {
             val cb = createFullWidthCheckBox("Pass HTTP headers to command", ci.passHeaders, panel, cs)
             addFullWidthComponent(JLabel(PASS_HTTP_HEADERS_NOTE), panel, cs)
@@ -831,8 +834,85 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
             inputMethod = Piper.CommandInvocation.InputMethod.FILENAME
             addAllPostfix(params.drop(prefixCount + 1))
         }
+        val parameterItems = parameterEditor.items.toList()
+        val duplicateNames = parameterItems.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+        if (duplicateNames.isNotEmpty()) {
+            throw RuntimeException("Parameter names must be unique: ${duplicateNames.joinToString(", ")}")
+        }
+        addAllParameter(parameterItems)
         if (cbPassHeaders?.isSelected == true) passHeaders = true
     }.build()
+}
+
+private class CommandParameterListEditor(
+    source: List<Piper.CommandInvocation.Parameter>,
+    parent: Component?,
+) : ListEditor<Piper.CommandInvocation.Parameter>(fillDefaultModel(source), parent, "Interactive parameters (prompted before execution):") {
+
+    override fun addDialog(): Piper.CommandInvocation.Parameter? =
+        CommandParameterDialog(Piper.CommandInvocation.Parameter.getDefaultInstance(), parent).showGUI()
+
+    override fun editDialog(value: Piper.CommandInvocation.Parameter): Piper.CommandInvocation.Parameter? =
+        CommandParameterDialog(value, parent).showGUI()
+
+    override fun toHumanReadable(value: Piper.CommandInvocation.Parameter): String = buildString {
+        append(value.displayName)
+        if (!value.defaultValue.isNullOrEmpty()) {
+            append(" (default: \"${value.defaultValue}\")")
+        }
+    }
+
+    val items: Iterable<Piper.CommandInvocation.Parameter>
+        get() = model.toIterable()
+}
+
+private class CommandParameterDialog(
+    private val parameter: Piper.CommandInvocation.Parameter,
+    parent: Component?,
+) : ConfigDialog<Piper.CommandInvocation.Parameter>(parent, if (parameter.name.isEmpty()) "Add parameter" else "Edit parameter \"${parameter.displayName}\"") {
+
+    private val nameField = createLabeledTextField("Placeholder name:", parameter.name, panel, cs)
+    private val labelField = createLabeledTextField(
+        "Prompt label (shown to the user):",
+        if (parameter.label.isNullOrEmpty()) parameter.displayName else parameter.label,
+        panel,
+        cs,
+    )
+    private val descriptionArea = JTextArea(parameter.descriptionOrNull() ?: "").apply {
+        lineWrap = true
+        wrapStyleWord = true
+        rows = 3
+    }
+    private val defaultField = createLabeledTextField("Default value (optional):", parameter.defaultValue, panel, cs)
+    private val requiredCheckBox = createFullWidthCheckBox("Require the user to supply a value", parameter.required, panel, cs)
+
+    init {
+        val descriptionScroll = JScrollPane(descriptionArea)
+        descriptionScroll.preferredSize = Dimension(200, descriptionArea.preferredSize.height)
+        createLabeledWidget("Description (optional):", descriptionScroll, panel, cs)
+        addFullWidthComponent(JLabel("Use the placeholder as \"${name}\" in the command line."), panel, cs)
+    }
+
+    override fun processGUI(): Piper.CommandInvocation.Parameter {
+        val name = nameField.text.trim()
+        if (name.isEmpty()) {
+            throw RuntimeException("The placeholder name cannot be empty.")
+        }
+        if (!name.matches(Regex("[A-Za-z0-9_]+"))) {
+            throw RuntimeException("Placeholder names may contain letters, digits, and underscores only.")
+        }
+        val label = labelField.text.trim()
+        val description = descriptionArea.text.trim()
+        val defaultValue = defaultField.text
+
+        return Piper.CommandInvocation.Parameter.newBuilder().apply {
+            this.name = name
+            if (label.isNotEmpty() && label != name) this.label = label
+            if (description.isNotEmpty()) this.description = description
+            if (defaultValue.isNotEmpty()) this.defaultValue = defaultValue
+            if (requiredCheckBox.isSelected) this.required = true
+        }.build()
+    }
 }
 
 private class InputMethodWidget(private val w: Window, private val label: JLabel = JLabel(),
