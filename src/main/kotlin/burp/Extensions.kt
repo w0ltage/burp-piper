@@ -256,7 +256,7 @@ fun Piper.CommandInvocation.checkDependencies() {
                 yield(command)
             }
         }
-        yieldAll(requiredInPathList)
+        yieldAll(requiredInPathList.filterNot { it.startsWith(GENERATOR_TAG_PREFIX) })
     }
     throw DependencyException(s.firstOrNull { !findExecutable(it) } ?: return)
 }

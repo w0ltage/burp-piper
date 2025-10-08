@@ -97,13 +97,9 @@ fun populatePiperTabs(
 
     tabs.addTab(
         "Intruder payload generators",
-        MinimalToolListEditor(
+        IntruderPayloadGeneratorManagerPanel(
             cfg.intruderPayloadGeneratorsModel,
             parent,
-            ::IntruderPayloadGeneratorDialog,
-            Piper.MinimalTool::getDefaultInstance,
-            ::minimalToolFromMap,
-            Piper.MinimalTool::toMap,
         ),
     )
 
