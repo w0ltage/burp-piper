@@ -84,8 +84,21 @@ fun commandInvocationFromMap(source: Map<String, Any>): Piper.CommandInvocation 
         copyBooleanFlag("passHeaders", b::setPassHeaders)
         copyStructured("stdout", b::setStdout, ::messageMatchFromMap)
         copyStructured("stderr", b::setStderr, ::messageMatchFromMap)
+        copyListOfStructured("parameters", b::addParameter, ::commandParameterFromMap)
     }
     return b.build()
+}
+
+fun commandParameterFromMap(source: Map<String, Any>): Piper.CommandInvocation.Parameter {
+    val builder = Piper.CommandInvocation.Parameter.newBuilder()
+            .setName(source.stringOrDie("name"))
+    (source["label"] as? String)?.let(builder::setLabel)
+    (source["description"] as? String)?.let(builder::setDescription)
+    (source["defaultValue"] as? String)?.let(builder::setDefaultValue)
+    if (source["required"] == true) {
+        builder.required = true
+    }
+    return builder.build()
 }
 
 fun messageMatchFromMap(source: Map<String, Any>): Piper.MessageMatch {
@@ -320,7 +333,17 @@ fun Piper.CommandInvocation.toMap(): MutableMap<String, Any> {
     if (this.exitCodeCount > 0) m["exitCode"] = this.exitCodeList
     if (this.hasStdout()) m["stdout"] = this.stdout.toMap()
     if (this.hasStderr()) m["stderr"] = this.stderr.toMap()
+    if (this.parameterCount > 0) m["parameters"] = this.parameterList.map(Piper.CommandInvocation.Parameter::toMap)
     return m
+}
+
+fun Piper.CommandInvocation.Parameter.toMap(): MutableMap<String, Any> {
+    val map = mutableMapOf<String, Any>("name" to this.name)
+    if (!this.label.isNullOrEmpty()) map["label"] = this.label
+    if (!this.description.isNullOrEmpty()) map["description"] = this.description
+    if (!this.defaultValue.isNullOrEmpty()) map["defaultValue"] = this.defaultValue
+    if (this.required) map["required"] = true
+    return map
 }
 
 fun Piper.RegularExpression.toMap(): Map<String, Any> {

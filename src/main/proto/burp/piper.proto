@@ -43,6 +43,14 @@ message CommandInvocation {
     repeated int32 exitCode = 6;
     MessageMatch stdout = 7;
     MessageMatch stderr = 8;
+    message Parameter {
+        string name = 1;
+        string label = 2;
+        string description = 3;
+        string defaultValue = 4;
+        bool required = 5;
+    }
+    repeated Parameter parameter = 9;
 }
 
 message MessageMatch {

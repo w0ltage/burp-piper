@@ -175,38 +175,82 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
             configModel.intruderPayloadGeneratorsModel, callbacks::removeIntruderPayloadGeneratorFactory, callbacks::registerIntruderPayloadGeneratorFactory) {
         override fun isModelItemEnabled(item: Piper.MinimalTool): Boolean = item.enabled
 
+        private val emptyPayloadGenerator = object : IIntruderPayloadGenerator {
+            override fun reset() {}
+            override fun getNextPayload(baseValue: ByteArray?): ByteArray = ByteArray(0)
+            override fun hasMorePayloads(): Boolean = false
+        }
+
         override fun modelToBurp(modelItem: Piper.MinimalTool): IIntruderPayloadGeneratorFactory = object : IIntruderPayloadGeneratorFactory {
             override fun createNewInstance(attack: IIntruderAttack?): IIntruderPayloadGenerator {
+                val parameters = promptForCommandParameters(null, modelItem.name, modelItem.cmd)
+                if (parameters == null) {
+                    callbacks.printOutput("Piper: Payload generator \"${modelItem.name}\" was cancelled by the user.")
+                    return emptyPayloadGenerator
+                }
+                val resolvedParameters = try {
+                    modelItem.cmd.resolveParameterValues(parameters)
+                } catch (e: IllegalArgumentException) {
+                    callbacks.printError("Piper: ${e.message}")
+                    return emptyPayloadGenerator
+                }
+
                 return object : IIntruderPayloadGenerator {
-                    var process: Process? = null
-                    var reader: BufferedReader? = null
+                    private var execution: Pair<Process, List<File>>? = null
+                    private var reader: BufferedReader? = null
+                    private var finished = false
 
                     override fun reset() {
-                        reader?.close()
-                        process?.destroy()
-                        process = null
-                        reader = null
+                        closeExecution()
+                        finished = false
                     }
 
-                    override fun getNextPayload(baseValue: ByteArray?): ByteArray =
-                            stdout.readLine().toByteArray(charset = Charsets.ISO_8859_1)
+                    override fun getNextPayload(baseValue: ByteArray?): ByteArray {
+                        val nextLine = stdout()?.readLine()
+                        return if (nextLine == null) {
+                            finished = true
+                            closeExecution()
+                            ByteArray(0)
+                        } else {
+                            nextLine.toByteArray(charset = Charsets.ISO_8859_1)
+                        }
+                    }
 
                     override fun hasMorePayloads(): Boolean {
-                        val p = process
-                        return p == null || p.isAlive || stdout.ready()
+                        if (finished) {
+                            return false
+                        }
+                        val currentReader = reader
+                        val process = execution?.first
+                        return when {
+                            currentReader == null -> true
+                            process?.isAlive == true -> true
+                            else -> currentReader.ready()
+                        }
                     }
 
-                    private val stdout: BufferedReader
-                        get() {
-                            val currentReader = reader
-                            return if (currentReader == null) {
-                                val p = modelItem.cmd.execute(ByteArray(0)).first
-                                process = p
-                                val newReader = p.inputStream.bufferedReader(charset = Charsets.ISO_8859_1)
-                                reader = newReader
-                                newReader
-                            } else currentReader
+                    private fun stdout(): BufferedReader? {
+                        if (finished) {
+                            return null
                         }
+                        val existing = reader
+                        if (existing != null) {
+                            return existing
+                        }
+                        val exec = modelItem.cmd.execute(resolvedParameters, ByteArray(0))
+                        execution = exec
+                        val newReader = exec.first.inputStream.bufferedReader(charset = Charsets.ISO_8859_1)
+                        reader = newReader
+                        return newReader
+                    }
+
+                    private fun closeExecution() {
+                        reader?.close()
+                        execution?.first?.destroy()
+                        execution?.second?.forEach(File::delete)
+                        reader = null
+                        execution = null
+                    }
                 }
             }
 

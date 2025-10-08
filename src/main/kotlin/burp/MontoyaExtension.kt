@@ -9,6 +9,7 @@ import burp.api.montoya.intruder.GeneratedPayload
 import burp.api.montoya.intruder.PayloadData
 import burp.api.montoya.intruder.PayloadGenerator
 import burp.api.montoya.intruder.PayloadGeneratorProvider
+import burp.api.montoya.intruder.IntruderInsertionPoint
 import burp.api.montoya.intruder.PayloadProcessingResult
 import burp.api.montoya.intruder.PayloadProcessor
 import burp.api.montoya.ui.Selection
@@ -25,10 +26,12 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
 import java.net.URL
+import java.lang.reflect.InvocationTargetException
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.text.Charsets
 import com.redpois0n.terminal.JTerminal
@@ -50,6 +53,11 @@ class MontoyaExtension : BurpExtension {
     private lateinit var processorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var generatorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var messageViewerManager: MontoyaMessageViewerManager
+
+    private val emptyPayloadGenerator = object : PayloadGenerator {
+        override fun generatePayloadFor(insertionPoint: IntruderInsertionPoint?): GeneratedPayload =
+            GeneratedPayload.end()
+    }
 
     private val saveOnChangeListener = object : ListDataListener {
         override fun contentsChanged(e: ListDataEvent) = saveConfig()
@@ -147,11 +155,41 @@ class MontoyaExtension : BurpExtension {
             override fun displayName(): String = tool.name
 
             override fun providePayloadGenerator(attackConfiguration: AttackConfiguration?): PayloadGenerator {
-                return PiperPayloadGenerator(tool)
+                val parameterValues = promptParameters(tool)
+                if (parameterValues == null) {
+                    api.logging().logToOutput("Piper: Payload generator \"${tool.name}\" was cancelled by the user.")
+                    return emptyPayloadGenerator
+                }
+                val resolvedParameters = try {
+                    tool.cmd.resolveParameterValues(parameterValues)
+                } catch (e: IllegalArgumentException) {
+                    api.logging().logToError("Piper: ${e.message}")
+                    return emptyPayloadGenerator
+                }
+                return PiperPayloadGenerator(tool, resolvedParameters)
             }
         }
 
         return api.intruder().registerPayloadGeneratorProvider(provider)
+    }
+
+    private fun promptParameters(tool: Piper.MinimalTool): Map<String, String>? {
+        val result = AtomicReference<Map<String, String>?>(null)
+        val parent = if (::suiteTabs.isInitialized) suiteTabs else null
+        try {
+            SwingUtilities.invokeAndWait {
+                result.set(promptForCommandParameters(parent, tool.name, tool.cmd))
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return null
+        } catch (e: InvocationTargetException) {
+            api.logging().logToError(
+                "Piper: Failed to collect parameters for ${tool.name}: ${e.cause?.message ?: e.message}",
+            )
+            return emptyMap()
+        }
+        return result.get()
     }
 
     private data class ViewerRegistrations(
@@ -455,7 +493,10 @@ class MontoyaExtension : BurpExtension {
         override fun selectedBytes(): kotlin.ByteArray? = terminal.selectedText?.toByteArray()
     }
 
-    private inner class PiperPayloadGenerator(private val tool: Piper.MinimalTool) : PayloadGenerator {
+    private inner class PiperPayloadGenerator(
+        private val tool: Piper.MinimalTool,
+        private val parameters: Map<String, String>,
+    ) : PayloadGenerator {
         private var execution: Pair<Process, List<File>>? = null
         private var reader: BufferedReader? = null
 
@@ -475,7 +516,7 @@ class MontoyaExtension : BurpExtension {
                 return existing
             }
 
-            val exec = tool.cmd.execute(kotlin.ByteArray(0))
+            val exec = tool.cmd.execute(parameters, kotlin.ByteArray(0))
             execution = exec
             val newReader = exec.first.inputStream.bufferedReader(charset = Charsets.ISO_8859_1)
             reader = newReader

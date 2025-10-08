@@ -154,16 +154,33 @@ fun ByteArray.endsWith(value: ByteString): Boolean {
 
 private const val DEFAULT_FILE_EXTENSION = ".bin"
 
-fun Piper.CommandInvocation.execute(vararg inputs: ByteArray): Pair<Process, List<File>> = execute(*inputs.map { it to null }.toTypedArray())
+fun Piper.CommandInvocation.execute(vararg inputs: ByteArray): Pair<Process, List<File>> =
+    execute(emptyMap(), *inputs.map { it to null }.toTypedArray())
 
-fun Piper.CommandInvocation.execute(vararg inputs: Pair<ByteArray, String?>): Pair<Process, List<File>> {
+fun Piper.CommandInvocation.execute(parameters: Map<String, String>, vararg inputs: ByteArray): Pair<Process, List<File>> =
+    execute(parameters, *inputs.map { it to null }.toTypedArray())
+
+fun Piper.CommandInvocation.execute(vararg inputs: Pair<ByteArray, String?>): Pair<Process, List<File>> =
+    execute(emptyMap(), *inputs)
+
+fun Piper.CommandInvocation.execute(
+    parameters: Map<String, String>,
+    vararg inputs: Pair<ByteArray, String?>,
+): Pair<Process, List<File>> {
     val tempFiles = if (this.inputMethod == Piper.CommandInvocation.InputMethod.FILENAME) {
         inputs.map { (contents, extension) ->
             File.createTempFile("piper-", extension ?: DEFAULT_FILE_EXTENSION).apply { writeBytes(contents) }
         }
     } else emptyList()
+    val resolvedParameters = resolveParameterValues(parameters)
     val args = this.prefixList + tempFiles.map(File::getAbsolutePath) + this.postfixList
-    val p = Runtime.getRuntime().exec(args.toTypedArray())
+    val substitutedArgs = applyParametersTo(args, resolvedParameters)
+    val processBuilder = ProcessBuilder(substitutedArgs)
+    val environment = processBuilder.environment()
+    for ((key, value) in parameterEnvironment(resolvedParameters)) {
+        environment[key] = value
+    }
+    val p = processBuilder.start()
     if (this.inputMethod == Piper.CommandInvocation.InputMethod.STDIN) {
         try {
             p.outputStream.use {
@@ -233,7 +250,12 @@ class DependencyException(dependency: String) : RuntimeException("Dependent exec
 
 fun Piper.CommandInvocation.checkDependencies() {
     val s = sequence {
-        if (prefixCount != 0) yield(getPrefix(0)!!)
+        if (prefixCount != 0) {
+            val command = getPrefix(0)!!
+            if (!command.containsParameterPlaceholder()) {
+                yield(command)
+            }
+        }
         yieldAll(requiredInPathList)
     }
     throw DependencyException(s.firstOrNull { !findExecutable(it) } ?: return)
