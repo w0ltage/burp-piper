@@ -19,6 +19,8 @@
 package burp
 
 import com.redpois0n.terminal.JTerminal
+import org.snakeyaml.engine.v1.api.Dump
+import org.snakeyaml.engine.v1.api.DumpSettingsBuilder
 import org.zeromq.codec.Z85
 import java.awt.*
 import java.awt.event.MouseEvent
@@ -34,6 +36,9 @@ import java.time.format.DateTimeFormatter
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.*
+import javax.swing.border.EmptyBorder
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 import javax.swing.event.ListSelectionEvent
@@ -557,13 +562,16 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
             override fun setRequest(message: ByteArray?) {}
             override fun setResponse(message: ByteArray?) {}
 
-            override fun toString() = toHumanReadable(this)
+            override fun toString(): String = toHumanReadable(this)
         }
 
         private val model = DefaultListModel<HttpRequestResponse>()
-        private val pnToolbar = JPanel()
-        private val listWidget = JList(model)
-        private val btnProcess = JButton("Process")
+        private val filterModel = FilteredQueueModel(model)
+        private val listWidget = JList(filterModel)
+        private val searchField = JTextField()
+        private val processButton = JButton("Process queue item…")
+        private val removeButton = createRemoveButton(listWidget, model)
+        private val detailPanel = QueueDetailPanel()
 
         fun add(values: Iterable<IHttpRequestResponse>) = values.map(::HttpRequestResponse).forEach(model::addElement)
 
@@ -575,21 +583,92 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
             return "${resp.statusCode} ${req.method} ${req.url} (response size = $size byte$plural)"
         }
 
-        private fun addButtons() {
-            btnProcess.addActionListener {
-                val b = it.source as Component
-                val loc = b.locationOnScreen
-                showMenu(loc.x, loc.y + b.height)
-            }
-
-            listOf(createRemoveButton(listWidget, model), btnProcess).map(pnToolbar::add)
-        }
-
         private fun showMenu(x: Int, y: Int) {
             val pm = JPopupMenu()
             generateContextMenu(listWidget.selectedValuesList, pm::add, selectionContext = null, includeCommentators = false)
             pm.show(this, 0, 0)
             pm.setLocation(x, y)
+        }
+
+        private fun buildUI() {
+            val renderer = object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(
+                    list: JList<*>?,
+                    value: Any?,
+                    index: Int,
+                    isSelected: Boolean,
+                    cellHasFocus: Boolean,
+                ): Component {
+                    val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                    val item = value as? HttpRequestResponse
+                    if (item != null) {
+                        text = toHumanReadable(item)
+                    }
+                    return component
+                }
+            }
+            listWidget.cellRenderer = renderer
+            listWidget.selectionMode = ListSelectionModel.SINGLE_SELECTION
+            listWidget.addListSelectionListener(this)
+            listWidget.addMouseListener(this)
+            filterModel.updateFilter("")
+
+            searchField.toolTipText = "Search by URL, status code, or comment"
+            searchField.document.addDocumentListener(object : DocumentListener {
+                override fun insertUpdate(e: DocumentEvent?) = applyFilter()
+                override fun removeUpdate(e: DocumentEvent?) = applyFilter()
+                override fun changedUpdate(e: DocumentEvent?) = applyFilter()
+            })
+
+            processButton.isEnabled = false
+            processButton.addActionListener {
+                val location = processButton.locationOnScreen
+                showMenu(location.x, location.y + processButton.height)
+            }
+
+            removeButton.addActionListener {
+                val filteredIndex = listWidget.selectedIndex
+                if (filteredIndex < 0) return@addActionListener
+                val backingIndex = filterModel.backingIndex(filteredIndex)
+                model.remove(backingIndex)
+            }
+
+            val leftPanel = JPanel(BorderLayout())
+            val searchPanel = JPanel(BorderLayout(4, 4))
+            searchPanel.add(JLabel("Search"), BorderLayout.WEST)
+            searchPanel.add(searchField, BorderLayout.CENTER)
+            leftPanel.add(searchPanel, BorderLayout.NORTH)
+            leftPanel.add(JScrollPane(listWidget), BorderLayout.CENTER)
+
+            val leftFooter = JPanel()
+            leftFooter.add(removeButton)
+            leftFooter.add(processButton)
+            leftPanel.add(leftFooter, BorderLayout.SOUTH)
+
+            val rightPanel = JPanel(BorderLayout())
+            rightPanel.border = EmptyBorder(8, 12, 8, 8)
+            rightPanel.add(detailPanel, BorderLayout.CENTER)
+
+            val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel)
+            splitPane.dividerLocation = 320
+            add(splitPane, BorderLayout.CENTER)
+        }
+
+        private fun applyFilter() {
+            filterModel.updateFilter(searchField.text.orEmpty())
+            if (filterModel.size == 0) {
+                listWidget.clearSelection()
+                detailPanel.display(null)
+            } else if (listWidget.selectedIndex < 0) {
+                listWidget.selectedIndex = 0
+            }
+            updateControls()
+        }
+
+        private fun updateControls() {
+            val hasSelection = listWidget.selectedIndex >= 0
+            processButton.isEnabled = hasSelection
+            removeButton.isEnabled = hasSelection
         }
 
         override fun mouseClicked(event: MouseEvent) {
@@ -603,24 +682,140 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         override fun mousePressed(p0: MouseEvent?) {}
         override fun mouseReleased(p0: MouseEvent?) {}
 
-        override fun valueChanged(p0: ListSelectionEvent?) { updateBtnEnableDisableState() }
-        override fun contentsChanged(p0: ListDataEvent?)   { updateBtnEnableDisableState() }
-        override fun intervalAdded  (p0: ListDataEvent?)   { updateBtnEnableDisableState() }
-        override fun intervalRemoved(p0: ListDataEvent?)   { updateBtnEnableDisableState() }
+        override fun valueChanged(event: ListSelectionEvent?) {
+            if (event?.valueIsAdjusting == true) return
+            val index = listWidget.selectedIndex
+            if (index < 0) {
+                detailPanel.display(null)
+            } else {
+                val item = filterModel.getElementAt(index)
+                detailPanel.display(item)
+            }
+            updateControls()
+        }
 
-        private fun updateBtnEnableDisableState() {
-            btnProcess.isEnabled = !listWidget.isSelectionEmpty
+        override fun contentsChanged(event: ListDataEvent?) {
+            filterModel.invalidate()
+            updateControls()
+        }
+
+        override fun intervalAdded(event: ListDataEvent?) {
+            filterModel.invalidate()
+            if (filterModel.size > 0 && listWidget.selectedIndex < 0) {
+                listWidget.selectedIndex = filterModel.size - 1
+            }
+            updateControls()
+        }
+
+        override fun intervalRemoved(event: ListDataEvent?) {
+            filterModel.invalidate()
+            updateControls()
         }
 
         init {
-            listWidget.addListSelectionListener(this)
-            listWidget.addMouseListener(this)
             model.addListDataListener(this)
+            buildUI()
+        }
 
-            addButtons()
-            updateBtnEnableDisableState()
-            add(pnToolbar, BorderLayout.NORTH)
-            add(JScrollPane(listWidget), BorderLayout.CENTER)
+        private inner class FilteredQueueModel(
+            private val backing: DefaultListModel<HttpRequestResponse>,
+        ) : AbstractListModel<HttpRequestResponse>(), ListDataListener {
+
+            private val indices = mutableListOf<Int>()
+            private var query: String = ""
+
+            init {
+                backing.addListDataListener(this)
+                rebuild()
+            }
+
+            override fun getSize(): Int = indices.size
+
+            override fun getElementAt(index: Int): HttpRequestResponse = backing.getElementAt(indices[index])
+
+            fun updateFilter(newQuery: String) {
+                query = newQuery.lowercase()
+                rebuild()
+            }
+
+            fun invalidate() {
+                rebuild()
+            }
+
+            fun backingIndex(filteredIndex: Int): Int = indices.getOrElse(filteredIndex) { -1 }
+
+            private fun rebuild() {
+                indices.clear()
+                for (i in 0 until backing.size()) {
+                    val value = backing.getElementAt(i)
+                    if (matches(value)) {
+                        indices += i
+                    }
+                }
+                val last = if (indices.isEmpty()) 0 else indices.size - 1
+                fireContentsChanged(this, 0, last)
+            }
+
+            private fun matches(value: HttpRequestResponse): Boolean {
+                if (query.isBlank()) return true
+                val haystack = buildString {
+                    val requestInfo = helpers.analyzeRequest(value)
+                    append(requestInfo.method.lowercase())
+                    append(' ')
+                    append(requestInfo.url.toString().lowercase())
+                    append(' ')
+                    append(value.comment?.lowercase().orEmpty())
+                    append(' ')
+                    append(value.highlight?.lowercase().orEmpty())
+                    val responseInfo = helpers.analyzeResponse(value.response)
+                    append(' ')
+                    append(responseInfo.statusCode.toString())
+                }
+                return haystack.contains(query)
+            }
+
+            override fun intervalAdded(e: ListDataEvent?) = rebuild()
+            override fun intervalRemoved(e: ListDataEvent?) = rebuild()
+            override fun contentsChanged(e: ListDataEvent?) = rebuild()
+
+            fun filteredIndexOf(backingIndex: Int): Int = indices.indexOf(backingIndex)
+        }
+
+        private inner class QueueDetailPanel : JPanel(BorderLayout()) {
+            private val headerLabel = JLabel("Select a message to see details", SwingConstants.LEFT)
+            private val requestArea = JTextArea().apply {
+                font = Font("monospaced", Font.PLAIN, 12)
+                isEditable = false
+                lineWrap = false
+            }
+            private val responseArea = JTextArea().apply {
+                font = Font("monospaced", Font.PLAIN, 12)
+                isEditable = false
+                lineWrap = false
+            }
+
+            init {
+                border = EmptyBorder(0, 0, 0, 0)
+                val tabs = JTabbedPane()
+                tabs.addTab("Request", JScrollPane(requestArea))
+                tabs.addTab("Response", JScrollPane(responseArea))
+                add(headerLabel, BorderLayout.NORTH)
+                add(tabs, BorderLayout.CENTER)
+            }
+
+            fun display(item: HttpRequestResponse?) {
+                if (item == null) {
+                    headerLabel.text = "Select a message to see details"
+                    requestArea.text = ""
+                    responseArea.text = ""
+                    return
+                }
+                headerLabel.text = toHumanReadable(item)
+                requestArea.text = helpers.bytesToString(item.request)
+                responseArea.text = helpers.bytesToString(item.response)
+                requestArea.caretPosition = 0
+                responseArea.caretPosition = 0
+            }
         }
     }
 
@@ -785,23 +980,99 @@ class ConfigModel(config: Piper.Config = Piper.Config.getDefaultInstance()) {
             .build()
 }
 
-fun createLoadSaveUI(cfg: ConfigModel, parent: Component?): Component {
-    return JPanel().apply {
-        add(JButton("Load/restore default config").apply {
-            addActionListener {
-                if (JOptionPane.showConfirmDialog(parent,
-                                "This will overwrite your currently loaded configuration with the default one. Are you sure?",
-                                "Confirm restoring default configuration", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
-                    cfg.fillModels(loadDefaultConfig())
-                }
+fun createLoadSaveUI(cfg: ConfigModel, parent: Component?): Component = LoadSavePanel(cfg, parent)
+
+
+
+private class LoadSavePanel(
+    private val cfg: ConfigModel,
+    private val parent: Component?,
+) : JPanel(BorderLayout()), ListDataListener {
+
+    private val yamlArea = JTextArea().apply {
+        font = Font("monospaced", Font.PLAIN, 12)
+        isEditable = false
+        lineWrap = false
+    }
+
+    init {
+        border = EmptyBorder(8, 8, 8, 8)
+        val actions = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = EmptyBorder(0, 0, 0, 12)
+        }
+
+        actions.add(createActionButton("Load/restore default config") {
+            if (JOptionPane.showConfirmDialog(
+                    parent,
+                    "This will overwrite your currently loaded configuration with the default one. Are you sure?",
+                    "Confirm restoring default configuration",
+                    JOptionPane.OK_CANCEL_OPTION,
+                ) == JOptionPane.OK_OPTION) {
+                cfg.fillModels(loadDefaultConfig())
             }
         })
-        add(JButton("Export to YAML file"      ).apply { addActionListener { exportConfig(ConfigFormat.YAML,     cfg, parent) } })
-        add(JButton("Export to ProtoBuf file"  ).apply { addActionListener { exportConfig(ConfigFormat.PROTOBUF, cfg, parent) } })
-        add(JButton("Import from YAML file"    ).apply { addActionListener { importConfig(ConfigFormat.YAML,     cfg, parent) } })
-        add(JButton("Import from ProtoBuf file").apply { addActionListener { importConfig(ConfigFormat.PROTOBUF, cfg, parent) } })
+
+        actions.add(Box.createVerticalStrut(8))
+        actions.add(JLabel("Export configuration").apply { alignmentX = Component.LEFT_ALIGNMENT })
+        actions.add(createActionButton("Export to YAML file") { exportConfig(ConfigFormat.YAML, cfg, parent) })
+        actions.add(createActionButton("Export to ProtoBuf file") { exportConfig(ConfigFormat.PROTOBUF, cfg, parent) })
+
+        actions.add(Box.createVerticalStrut(8))
+        actions.add(JLabel("Import configuration").apply { alignmentX = Component.LEFT_ALIGNMENT })
+        actions.add(createActionButton("Import from YAML file") { importConfig(ConfigFormat.YAML, cfg, parent) })
+        actions.add(createActionButton("Import from ProtoBuf file") { importConfig(ConfigFormat.PROTOBUF, cfg, parent) })
+
+        val leftScroll = JScrollPane(actions).apply {
+            border = EmptyBorder(0, 0, 0, 0)
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
         }
+
+        val rightPanel = JPanel(BorderLayout()).apply {
+            add(JLabel("Current configuration preview (YAML)"), BorderLayout.NORTH)
+            add(JScrollPane(yamlArea), BorderLayout.CENTER)
+            val refreshButton = JButton("Refresh preview")
+            refreshButton.addActionListener { updatePreview() }
+            add(refreshButton, BorderLayout.SOUTH)
+        }
+
+        val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, rightPanel)
+        splitPane.dividerLocation = 320
+        add(splitPane, BorderLayout.CENTER)
+
+        registerListeners()
+        updatePreview()
     }
+
+    private fun registerListeners() {
+        listOf(
+            cfg.macrosModel,
+            cfg.messageViewersModel,
+            cfg.menuItemsModel,
+            cfg.httpListenersModel,
+            cfg.commentatorsModel,
+            cfg.intruderPayloadProcessorsModel,
+            cfg.highlightersModel,
+            cfg.intruderPayloadGeneratorsModel,
+        ).forEach { it.addListDataListener(this) }
+    }
+
+    private fun createActionButton(text: String, action: () -> Unit): JButton =
+        JButton(text).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            addActionListener { action() }
+        }
+
+    private fun updatePreview() {
+        val dump = Dump(DumpSettingsBuilder().build())
+        yamlArea.text = dump.dumpToString(cfg.serialize().toSettings())
+        yamlArea.caretPosition = 0
+    }
+
+    override fun contentsChanged(e: ListDataEvent?) = updatePreview()
+    override fun intervalAdded(e: ListDataEvent?) = updatePreview()
+    override fun intervalRemoved(e: ListDataEvent?) = updatePreview()
+}
 
 private fun exportConfig(fmt: ConfigFormat, cfg: ConfigModel, parent: Component?) {
     val fc = JFileChooser()

@@ -27,7 +27,7 @@ fun populatePiperTabs(
 
     tabs.addTab(
         "Message viewers",
-        MessageViewerListEditor(
+        createMessageViewerManager(
             cfg.messageViewersModel,
             parent,
             cfg.commentatorsModel,
@@ -37,61 +37,41 @@ fun populatePiperTabs(
 
     tabs.addTab(
         "Context menu items",
-        MinimalToolListEditor(
+        createMenuItemManager(
             cfg.menuItemsModel,
             parent,
-            ::MenuItemDialog,
-            Piper.UserActionTool::getDefaultInstance,
-            UserActionToolFromMap,
-            Piper.UserActionTool::toMap,
         ),
     )
 
     tabs.addTab(
         "Macros",
-        MinimalToolListEditor(
+        createMacroManager(
             cfg.macrosModel,
             parent,
-            ::MacroDialog,
-            Piper.MinimalTool::getDefaultInstance,
-            ::minimalToolFromMap,
-            Piper.MinimalTool::toMap,
         ),
     )
 
     tabs.addTab(
         "HTTP listeners",
-        MinimalToolListEditor(
+        createHttpListenerManager(
             cfg.httpListenersModel,
             parent,
-            ::HttpListenerDialog,
-            Piper.HttpListener::getDefaultInstance,
-            ::httpListenerFromMap,
-            Piper.HttpListener::toMap,
         ),
     )
 
     tabs.addTab(
         "Commentators",
-        MinimalToolListEditor(
+        createCommentatorManager(
             cfg.commentatorsModel,
             parent,
-            ::CommentatorDialog,
-            Piper.Commentator::getDefaultInstance,
-            ::commentatorFromMap,
-            Piper.Commentator::toMap,
         ),
     )
 
     tabs.addTab(
         "Intruder payload processors",
-        MinimalToolListEditor(
+        createIntruderPayloadProcessorManager(
             cfg.intruderPayloadProcessorsModel,
             parent,
-            ::IntruderPayloadProcessorDialog,
-            Piper.MinimalTool::getDefaultInstance,
-            ::minimalToolFromMap,
-            Piper.MinimalTool::toMap,
         ),
     )
 
@@ -105,13 +85,9 @@ fun populatePiperTabs(
 
     tabs.addTab(
         "Highlighters",
-        MinimalToolListEditor(
+        createHighlighterManager(
             cfg.highlightersModel,
             parent,
-            ::HighlighterDialog,
-            Piper.Highlighter::getDefaultInstance,
-            ::highlighterFromMap,
-            Piper.Highlighter::toMap,
         ),
     )
 

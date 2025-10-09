@@ -507,7 +507,7 @@ class HighlighterDialog(private val highlighter: Piper.Highlighter, parent: Comp
     override fun buildEnabled(value: Boolean): Piper.Highlighter = highlighter.buildEnabled(value)
 }
 
-private fun createFullWidthCheckBox(caption: String, initialValue: Boolean, panel: Container, cs: GridBagConstraints): JCheckBox {
+fun createFullWidthCheckBox(caption: String, initialValue: Boolean, panel: Container, cs: GridBagConstraints): JCheckBox {
     cs.gridwidth = 4
     cs.gridx = 0
     cs.gridy++
@@ -952,7 +952,7 @@ private class InputMethodWidget(private val w: Window, private val label: JLabel
     }
 }
 
-private fun <E : Component> addFullWidthComponent(c: E, panel: Container, cs: GridBagConstraints): E {
+fun <E : Component> addFullWidthComponent(c: E, panel: Container, cs: GridBagConstraints): E {
     cs.gridx = 0
     cs.gridy++
     cs.gridwidth = 4
