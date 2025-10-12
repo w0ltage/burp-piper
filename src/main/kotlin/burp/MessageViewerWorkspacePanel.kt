@@ -617,9 +617,6 @@ class MessageViewerWorkspacePanel(
     private val filterModel = ViewerListModel(model) { it.common }
     private val list = JList<Piper.MessageViewer>(filterModel)
     private val searchField = JTextField()
-    private val saveButton = JButton("Save")
-    private val cancelButton = JButton("Cancel")
-    private val convertButton = JButton("Convert to commentator")
     private val header = NameHeaderPanel { markDirty() }
     private val overview = OverviewPane()
     private val filterTab = FilterTab(parent) { markDirty() }
@@ -627,6 +624,9 @@ class MessageViewerWorkspacePanel(
     private val validationTab = ValidationHistoryTab(parent) { collectMinimalToolForTest() }
     private val tabs = JTabbedPane()
     private val footer = JPanel()
+    private val saveButton = JButton("Save")
+    private val cancelButton = JButton("Cancel")
+    private val convertButton = JButton("Convert to commentator")
     private var currentState: ViewerEditorState? = null
     private var loading = false
 
@@ -888,8 +888,6 @@ class CommentatorWorkspacePanel(
     private val filterModel = ViewerListModel(model) { it.common }
     private val list = JList<Piper.Commentator>(filterModel)
     private val searchField = JTextField()
-    private val saveButton = JButton("Save")
-    private val cancelButton = JButton("Cancel")
     private val header = NameHeaderPanel { markDirty() }
     private val overview = OverviewPane()
     private val filterTab = FilterTab(parent) { markDirty() }
@@ -898,6 +896,8 @@ class CommentatorWorkspacePanel(
     private val commentOptions = CommentatorOptionsPanel { markDirty() }
     private val tabs = JTabbedPane()
     private val footer = JPanel()
+    private val saveButton = JButton("Save")
+    private val cancelButton = JButton("Cancel")
     private var currentState: ViewerEditorState? = null
     private var loading = false
 
