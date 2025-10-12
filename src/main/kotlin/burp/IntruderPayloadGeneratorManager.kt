@@ -94,6 +94,25 @@ private data class TemplateOption(val id: String?, val label: String) {
     override fun toString(): String = label
 }
 
+private fun renderGeneratorOverview(state: GeneratorEditorState): String = buildString {
+    appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
+    appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
+    if (state.tags.isNotEmpty()) {
+        appendLine("Tags: ${state.tags.joinToString(", ")}")
+    }
+    appendLine("Command: ${state.commandTokens.joinToString(" ")}")
+    appendLine("Input method: ${state.inputMethod.name}")
+    if (state.parameters.isNotEmpty()) {
+        appendLine("Parameters: ${state.parameters.joinToString { "${it.name} (${it.type.name.lowercase()})" }}")
+    }
+    if (state.dependencies.isNotEmpty()) {
+        appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
+    }
+    if (state.exitCodes.isNotEmpty()) {
+        appendLine("Success exit codes: ${state.exitCodes.joinToString(", ")}")
+    }
+}
+
 private data class GeneratorTemplate(
     val id: String,
     val name: String,
@@ -451,12 +470,14 @@ private class GeneratorEditorPanel(
     private var state: GeneratorEditorState? = null
     private var loading = false
 
-    private val nameField = JTextField()
-    private val enabledToggle = JToggleButton("Enabled")
-    private val tagsField = JTextField()
-    private val templateCombo = JComboBox<TemplateOption>()
+    private val header = WorkspaceHeaderPanel<TemplateOption>("Template") { markDirty() }
     private val tabbedPane = JTabbedPane()
-    private val overviewTab = OverviewPanel()
+    private val overviewTab = WorkspaceOverviewPanel<GeneratorEditorState>(
+        title = "Generator summary",
+        emptyText = "Select or create a generator to get started.",
+    ) { state ->
+        renderGeneratorOverview(state)
+    }
     private val commandTab = CommandEditorPanel { markDirty() }
     private val inputTab = InputMethodPanel { markDirty() }
     private val historyTab = HistoryPanel()
@@ -475,32 +496,14 @@ private class GeneratorEditorPanel(
             markDirty()
             validationTab.updateParameterInputs(parametersTab.parameters)
         }
-        val header = JPanel()
-        header.layout = BoxLayout(header, BoxLayout.X_AXIS)
-        header.add(JLabel("Name:"))
-        header.add(Box.createRigidArea(Dimension(8, 0)))
-        nameField.columns = 24
-        header.add(nameField)
-        header.add(Box.createRigidArea(Dimension(12, 0)))
-        enabledToggle.isSelected = true
-        enabledToggle.addActionListener { markDirty() }
-        header.add(enabledToggle)
-        header.add(Box.createRigidArea(Dimension(12, 0)))
-        header.add(JLabel("Tags:"))
-        header.add(Box.createRigidArea(Dimension(4, 0)))
-        tagsField.toolTipText = "Comma separated tags"
-        tagsField.columns = 18
-        header.add(tagsField)
-        header.add(Box.createRigidArea(Dimension(12, 0)))
-        header.add(JLabel("Template:"))
-        header.add(Box.createRigidArea(Dimension(4, 0)))
-        templateCombo.addActionListener {
+        header.nameField.columns = 24
+        header.tagsField.toolTipText = "Comma separated tags"
+        header.tagsField.columns = 18
+        header.templateCombo.addActionListener {
             if (!loading) {
-                applyTemplate(templateCombo.selectedItem as? TemplateOption)
+                applyTemplate(header.templateCombo.selectedItem as? TemplateOption)
             }
         }
-        header.add(templateCombo)
-        header.add(Box.createHorizontalGlue())
         add(header, BorderLayout.NORTH)
 
         tabbedPane.addTab("Overview", overviewTab)
@@ -526,54 +529,61 @@ private class GeneratorEditorPanel(
         footer.add(Box.createHorizontalGlue())
         footer.add(cancelButton)
         add(footer, BorderLayout.SOUTH)
-
-        nameField.document.addDocumentListener(SimpleDocumentListener { markDirty() })
-        tagsField.document.addDocumentListener(SimpleDocumentListener { markDirty() })
     }
 
     fun displayState(newState: GeneratorEditorState?) {
         state = newState
         loading = true
         try {
+            val selectedTemplate = populateTemplates(newState?.templateId)
+            header.setValues(
+                WorkspaceHeaderValues(
+                    name = newState?.name.orEmpty(),
+                    enabled = newState?.enabled ?: false,
+                    tags = newState?.tags ?: emptyList(),
+                    template = selectedTemplate,
+                ),
+            )
             if (newState == null) {
-                nameField.text = ""
-                enabledToggle.isSelected = false
-                tagsField.text = ""
                 commandTab.setTokens(emptyList())
                 parametersTab.setParameters(emptyList())
                 inputTab.setInputMethod(Piper.CommandInvocation.InputMethod.STDIN, emptyList(), false)
                 validationTab.reset()
                 validationTab.updateParameterInputs(emptyList())
-                overviewTab.updateOverview(null)
+                overviewTab.display(null)
                 historyTab.clear()
                 saveButton.isEnabled = false
                 return
             }
-            nameField.text = newState.name
-            enabledToggle.isSelected = newState.enabled
-            tagsField.text = newState.tags.joinToString(", ")
             commandTab.setTokens(newState.commandTokens)
             parametersTab.setParameters(newState.parameters)
             validationTab.updateParameterInputs(newState.parameters)
             inputTab.setInputMethod(newState.inputMethod, newState.exitCodes, newState.passHeaders)
             validationTab.reset()
-            overviewTab.updateOverview(newState)
+            overviewTab.display(newState)
             historyTab.clear()
-            populateTemplates(newState.templateId)
             saveButton.isEnabled = false
         } finally {
             loading = false
         }
     }
 
-    private fun populateTemplates(selectedId: String?) {
+    private fun populateTemplates(selectedId: String?): TemplateOption? {
         val options = mutableListOf(TemplateOption(null, "Custom"))
         GeneratorTemplates.all().forEach { template ->
             options += TemplateOption(template.id, template.name)
         }
-        templateCombo.model = DefaultComboBoxModel(options.toTypedArray())
         val index = options.indexOfFirst { it.id == selectedId }
-        templateCombo.selectedIndex = if (index >= 0) index else 0
+        val selectedIndex = when {
+            index >= 0 -> index
+            options.isNotEmpty() -> 0
+            else -> -1
+        }
+        header.withTemplateChangeSuppressed {
+            header.templateCombo.model = DefaultComboBoxModel(options.toTypedArray())
+            header.templateCombo.selectedIndex = selectedIndex
+        }
+        return options.getOrNull(selectedIndex)
     }
 
     private fun applyTemplate(option: TemplateOption?) {
@@ -588,10 +598,11 @@ private class GeneratorEditorPanel(
 
     private fun collectStateFromUI(): GeneratorEditorState? {
         val current = state ?: GeneratorEditorState()
-        current.name = nameField.text.trim()
-        current.enabled = enabledToggle.isSelected
-        current.tags = tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }.toMutableList()
-        current.templateId = (templateCombo.selectedItem as? TemplateOption)?.id
+        val headerValues = header.readValues()
+        current.name = headerValues.name.trim()
+        current.enabled = headerValues.enabled
+        current.tags = headerValues.tags.toMutableList()
+        current.templateId = headerValues.template?.id
         current.commandTokens = commandTab.tokens().toMutableList()
         val paramStates = parametersTab.parameters
         current.parameters = paramStates.map { it.copy() }.toMutableList()
@@ -599,7 +610,7 @@ private class GeneratorEditorPanel(
         current.inputMethod = inputConfig.method
         current.exitCodes = inputConfig.exitCodes.toMutableList()
         current.passHeaders = inputConfig.passHeaders
-        overviewTab.updateOverview(current)
+        overviewTab.display(current)
         state = current
         return current
     }
@@ -650,64 +661,6 @@ private class GeneratorEditorPanel(
     private fun markDirty() {
         if (!loading) {
             saveButton.isEnabled = true
-        }
-    }
-}
-
-private class OverviewPanel : JPanel(BorderLayout()) {
-    private val titleLabel = JLabel("Generator summary")
-    private val summaryArea = JTextArea()
-
-    init {
-        border = EmptyBorder(12, 12, 12, 12)
-
-        val container = JPanel()
-        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
-        container.isOpaque = false
-
-        titleLabel.font = titleLabel.font.deriveFont(Font.BOLD)
-        titleLabel.alignmentX = Component.LEFT_ALIGNMENT
-        container.add(titleLabel)
-        container.add(Box.createVerticalStrut(8))
-
-        summaryArea.isEditable = false
-        summaryArea.isOpaque = false
-        summaryArea.lineWrap = true
-        summaryArea.wrapStyleWord = true
-        summaryArea.border = null
-        UIManager.getFont("Label.font")?.let(summaryArea::setFont)
-        UIManager.getColor("Label.foreground")?.let(summaryArea::setForeground)
-        summaryArea.alignmentX = Component.LEFT_ALIGNMENT
-        container.add(summaryArea)
-
-        val wrapper = JPanel(BorderLayout())
-        wrapper.isOpaque = false
-        wrapper.add(container, BorderLayout.NORTH)
-        add(wrapper, BorderLayout.CENTER)
-    }
-
-    fun updateOverview(state: GeneratorEditorState?) {
-        if (state == null) {
-            summaryArea.text = "Select or create a generator to get started."
-            return
-        }
-        summaryArea.text = buildString {
-            appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
-            appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
-            if (state.tags.isNotEmpty()) {
-                appendLine("Tags: ${state.tags.joinToString(", ")}")
-            }
-            appendLine("Command: ${state.commandTokens.joinToString(" ")}")
-            appendLine("Input method: ${state.inputMethod.name}")
-            if (state.parameters.isNotEmpty()) {
-                appendLine("Parameters: ${state.parameters.joinToString { "${it.name} (${it.type.name.lowercase()})" }}")
-            }
-            if (state.dependencies.isNotEmpty()) {
-                appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
-            }
-            if (state.exitCodes.isNotEmpty()) {
-                appendLine("Success exit codes: ${state.exitCodes.joinToString(", ")}")
-            }
         }
     }
 }
@@ -1062,7 +1015,7 @@ private class InputMethodPanel(
         constraints.gridx = 1
         exitCodesField.columns = 16
         add(exitCodesField, constraints)
-        exitCodesField.document.addDocumentListener(SimpleDocumentListener { onChange() })
+        exitCodesField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
 
         constraints.gridx = 0
         constraints.gridy = 3
@@ -1356,11 +1309,7 @@ private fun Piper.MinimalTool.buildTokenList(): MutableList<String> {
     return tokens
 }
 
-private class SimpleDocumentListener(private val handler: () -> Unit) : DocumentListener {
-    override fun insertUpdate(e: DocumentEvent?) = handler()
-    override fun removeUpdate(e: DocumentEvent?) = handler()
-    override fun changedUpdate(e: DocumentEvent?) = handler()
-}
+
 
 private fun GeneratorEditorState.deepCopy(): GeneratorEditorState {
     val copy = GeneratorEditorState()
