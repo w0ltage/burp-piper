@@ -35,7 +35,9 @@ import javax.swing.event.DocumentListener
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 
-private data class ViewerTemplateOption(val id: String?, val label: String, val description: String)
+private data class ViewerTemplateOption(val id: String?, val label: String, val description: String) {
+    override fun toString(): String = label
+}
 
 private data class ViewerEditorState(
     var modelIndex: Int? = null,

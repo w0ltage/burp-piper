@@ -307,22 +307,131 @@ interface ChangeListener<E> {
     fun valueChanged(value: E?)
 }
 
-class CollapsedMessageMatchWidget(w: Window, mm: Piper.MessageMatch?, val showHeaderMatch: Boolean, caption: String) :
-        CollapsedWidget<Piper.MessageMatch>(w, mm, caption, removable = true) {
+class CollapsedMessageMatchWidget(
+    private val window: Window,
+    mm: Piper.MessageMatch?,
+    private val showHeaderMatch: Boolean,
+    private val caption: String,
+) {
+    private val changeListeners = mutableListOf<ChangeListener<Piper.MessageMatch>>()
+    private val enableCheck = JCheckBox("Enable filter")
+    private val btnCopy = JButton("Copy")
+    private val btnPaste = JButton("Paste")
+    private val btnClear = JButton("Clear")
+    private val editorPanel = MessageMatchEditorPanel(
+        window,
+        window,
+        showHeaderMatch,
+        mm ?: Piper.MessageMatch.getDefaultInstance(),
+    )
+    private val editorContainer = JPanel(BorderLayout()).apply {
+        border = BorderFactory.createEmptyBorder(4, 8, 8, 8)
+        add(editorPanel, BorderLayout.CENTER)
+    }
+    private var lastDefinedValue: Piper.MessageMatch = mm ?: Piper.MessageMatch.getDefaultInstance()
 
-    override fun editDialog(value: Piper.MessageMatch, parent: Component): Piper.MessageMatch? =
-            MessageMatchDialog(value, showHeaderMatch = showHeaderMatch, parent = parent).showGUI()
+    var value: Piper.MessageMatch? = mm
+        set(newValue) {
+            field = newValue
+            if (newValue != null) {
+                lastDefinedValue = newValue
+            }
+            updateState()
+            notifyListeners()
+        }
 
-    override fun toHumanReadable(): String =
-            value?.toHumanReadable(negation = false, hideParentheses = true) ?: "(no filter)"
+    init {
+        enableCheck.addActionListener {
+            if (enableCheck.isSelected) {
+                value = lastDefinedValue
+            } else {
+                readCurrentMatch()?.let { lastDefinedValue = it }
+                value = null
+            }
+        }
 
-    override val asMap: Map<String, Any>?
-        get() = value?.toMap()
+        btnCopy.addActionListener {
+            val current = value ?: return@addActionListener
+            val yaml = Dump(DumpSettingsBuilder().build()).dumpToString(current.toMap())
+            Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(yaml), null)
+        }
 
-    override fun parseMap(map: Map<String, Any>): Piper.MessageMatch = messageMatchFromMap(map)
+        btnPaste.addActionListener {
+            val clip = Toolkit.getDefaultToolkit().systemClipboard
+            val text = clip.getData(DataFlavor.stringFlavor) as? String ?: return@addActionListener
+            val loader = Load(LoadSettingsBuilder().build())
+            try {
+                val parsed = messageMatchFromMap(loader.loadFromString(text) as Map<String, Any>)
+                value = parsed
+            } catch (e: Exception) {
+                JOptionPane.showMessageDialog(window, e.message)
+            }
+        }
 
-    override val default: Piper.MessageMatch
-        get() = Piper.MessageMatch.getDefaultInstance()
+        btnClear.addActionListener {
+            readCurrentMatch()?.let { lastDefinedValue = it }
+            value = null
+        }
+
+        editorPanel.addChangeListener {
+            if (enableCheck.isSelected) {
+                val updated = readCurrentMatch() ?: return@addChangeListener
+                lastDefinedValue = updated
+                value = updated
+            }
+        }
+
+        updateState()
+    }
+
+    private fun readCurrentMatch(): Piper.MessageMatch? = try {
+        editorPanel.toMessageMatch()
+    } catch (e: CancelClosingWindow) {
+        null
+    } catch (e: RuntimeException) {
+        JOptionPane.showMessageDialog(window, e.message)
+        null
+    }
+
+    private fun setPanelEnabled(component: Component, enabled: Boolean) {
+        component.isEnabled = enabled
+        if (component is Container) {
+            component.components.forEach { setPanelEnabled(it, enabled) }
+        }
+    }
+
+    private fun updateState() {
+        val enabled = value != null
+        enableCheck.isSelected = enabled
+        btnCopy.isEnabled = enabled
+        btnClear.isEnabled = enabled
+        editorContainer.isVisible = enabled
+        if (enabled) {
+            editorPanel.setValue(value ?: lastDefinedValue)
+        }
+        setPanelEnabled(editorPanel, enabled)
+    }
+
+    private fun notifyListeners() {
+        changeListeners.forEach { it.valueChanged(value) }
+    }
+
+    fun addChangeListener(listener: ChangeListener<Piper.MessageMatch>) {
+        changeListeners += listener
+        listener.valueChanged(value)
+    }
+
+    fun buildGUI(panel: Container, cs: GridBagConstraints) {
+        addFullWidthComponent(JLabel(caption), panel, cs)
+        val controls = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+            add(enableCheck)
+            add(btnCopy)
+            add(btnPaste)
+            add(btnClear)
+        }
+        addFullWidthComponent(controls, panel, cs)
+        addFullWidthComponent(editorContainer, panel, cs)
+    }
 }
 
 class CollapsedCommandInvocationWidget(w: Window, cmd: Piper.CommandInvocation, private val purpose: CommandInvocationPurpose, private val showPassHeaders: Boolean = true) :
@@ -611,21 +720,7 @@ class HeaderMatchDialog(hm: Piper.HeaderMatch, parent: Component) : ConfigDialog
     }
 }
 
-const val CMDLINE_INPUT_FILENAME_PLACEHOLDER = "<INPUT>"
-const val CMDLINE_EMPTY_STRING_PLACEHOLDER = "<EMPTY STRING>"
-
-data class CommandLineParameter(val value: String?) { // null = input file name
-    val isInputFileName: Boolean
-        get() = value == null
-    val isEmptyString: Boolean
-        get() = value?.isEmpty() == true
-    override fun toString(): String = when {
-        isInputFileName -> CMDLINE_INPUT_FILENAME_PLACEHOLDER
-        value.isNullOrEmpty() -> CMDLINE_EMPTY_STRING_PLACEHOLDER // empty strings would be rendered as a barely visible 1 to 2 px high item
-        else -> value
-    }
-}
-
+const val CMDLINE_INPUT_FILENAME_PLACEHOLDER = INPUT_FILENAME_TOKEN
 const val PASS_HTTP_HEADERS_NOTE = "<html>Note: if the above checkbox is <font color='red'>unchecked</font>, messages without a body (such as<br>" +
         "GET/HEAD requests or 204 No Content responses) are <font color='red'>ignored by this tool</font>.</html>"
 
@@ -633,17 +728,10 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
                               showPassHeaders: Boolean) : ConfigDialog<Piper.CommandInvocation>(parent, "Command invocation editor") {
     private val ccmwStdout = CollapsedMessageMatchWidget(this, mm = ci.stdout, showHeaderMatch = false, caption = "Match on stdout: ")
     private val ccmwStderr = CollapsedMessageMatchWidget(this, mm = ci.stderr, showHeaderMatch = false, caption = "Match on stderr: ")
-    private val monospaced12 = Font("monospaced", Font.PLAIN, 12)
     private var tfExitCode: JTextField? = null
     private val cbPassHeaders: JCheckBox?
     private val tfDependencies = JTextField()
-
-    private val hasFileName = ci.inputMethod == Piper.CommandInvocation.InputMethod.FILENAME
-    private val paramsModel = fillDefaultModel(sequence {
-        yieldAll(ci.prefixList)
-        if (hasFileName) yield(null)
-        yieldAll(ci.postfixList)
-    }.map(::CommandLineParameter))
+    private val tokensPanel = CommandTokensPanel()
     private val parameterEditor = CommandParameterListEditor(ci.parameterList, this)
 
     fun parseExitCodeList(): Iterable<Int> {
@@ -653,120 +741,8 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
     }
 
     init {
-        val lsParams = JList(paramsModel)
-        lsParams.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
-        lsParams.font = monospaced12
-
-        lsParams.cellRenderer = object : DefaultListCellRenderer() {
-            override fun getListCellRendererComponent(list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
-                val c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-                val v = value as CommandLineParameter
-                if (v.isInputFileName) {
-                    c.background = Color.RED
-                    c.foreground = if (isSelected) Color.YELLOW else Color.WHITE
-                } else if (v.isEmptyString) {
-                    c.background = Color.YELLOW
-                    c.foreground = if (isSelected) Color.RED else Color.BLUE
-                }
-                return c
-            }
-        }
-
-        lsParams.addDoubleClickListener {
-            if (paramsModel[it].isInputFileName) {
-                JOptionPane.showMessageDialog(this, CMDLINE_INPUT_FILENAME_PLACEHOLDER +
-                        " is a special placeholder for the names of the input file(s), and thus cannot be edited.")
-                return@addDoubleClickListener
-            }
-            paramsModel[it] = CommandLineParameter(
-                    JOptionPane.showInputDialog(this, "Edit command line parameter no. ${it + 1}:", paramsModel[it].value)
-                            ?: return@addDoubleClickListener)
-        }
-
-        cs.gridwidth = 4
-
-        panel.add(JLabel("Command line parameters: (one per line)"), cs)
-
-        cs.gridy = 1
-        cs.gridwidth = 3
-        cs.gridheight = 3
-        cs.fill = GridBagConstraints.BOTH
-
-        panel.add(JScrollPane(lsParams), cs)
-
-        val btnMoveUp = JButton("Move up")
-        btnMoveUp.addActionListener {
-            val si = lsParams.selectedIndices
-            if (si.isEmpty() || si[0] == 0) return@addActionListener
-            si.forEach {
-                paramsModel.insertElementAt(paramsModel.remove(it - 1), it)
-            }
-        }
-
-        val btnMoveDown = JButton("Move down")
-        btnMoveDown.addActionListener {
-            val si = lsParams.selectedIndices
-            if (si.isEmpty() || si.last() == paramsModel.size - 1) return@addActionListener
-            si.reversed().forEach {
-                paramsModel.insertElementAt(paramsModel.remove(it + 1), it)
-            }
-            lsParams.selectedIndices = si.map { it + 1 }.toIntArray()
-        }
-
-        cs.gridx = 3
-        cs.gridwidth = 1
-        cs.gridheight = 1
-        cs.fill = GridBagConstraints.HORIZONTAL
-
-        panel.add(createRemoveButton(lsParams, paramsModel), cs)
-
-        cs.gridy = 2; panel.add(btnMoveUp, cs)
-        cs.gridy = 3; panel.add(btnMoveDown, cs)
-
-        val tfParam = JTextField()
-        val btnAdd = JButton("Add")
-
-        btnAdd.addActionListener {
-            paramsModel.addElement(CommandLineParameter(tfParam.text))
-            tfParam.text = ""
-        }
-
-        cs.gridy = 4
-
-        cs.gridx = 0; cs.gridwidth = 1; panel.add(JLabel("Add parameter: "), cs)
-        cs.gridx = 1; cs.gridwidth = 2; panel.add(tfParam, cs)
-        cs.gridx = 3; cs.gridwidth = 1; panel.add(btnAdd, cs)
-
-        val cbSpace = createFullWidthCheckBox("Auto-add upon pressing space or closing quotes", true, panel, cs)
-
-        tfParam.font = monospaced12
-        tfParam.addKeyListener(object : KeyAdapter() {
-            override fun keyTyped(e: KeyEvent) {
-                if (cbSpace.isSelected) {
-                    val t = tfParam.text
-                    if (t.startsWith('"')) {
-                        if (e.keyChar == '"') {
-                            tfParam.text = t.substring(1)
-                            btnAdd.doClick()
-                            e.consume()
-                        }
-                    } else if (t.startsWith('\'')) {
-                        if (e.keyChar == '\'') {
-                            tfParam.text = t.substring(1)
-                            btnAdd.doClick()
-                            e.consume()
-                        }
-                    } else if (e.keyChar == ' ' && t.isNotEmpty()) {
-                        btnAdd.doClick()
-                        e.consume()
-                    }
-                }
-            }
-        })
-
-        cs.gridy = 6
-
-        InputMethodWidget.create(this, panel, cs, hasFileName, paramsModel)
+        addFullWidthComponent(tokensPanel, panel, cs)
+        tokensPanel.setTokens(toTokenList(ci))
 
         addFullWidthComponent(parameterEditor, panel, cs)
 
@@ -812,19 +788,36 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
             } catch (e: NumberFormatException) {
                 throw RuntimeException("Exit codes should contain numbers separated by commas only. (Whitespace is ignored.)")
             }
-            if (purpose == CommandInvocationPurpose.MATCH_FILTER && !hasFilter) {
+            val hasExitCodes = tfExitCode?.text?.isNotBlank() == true
+            val hasStdoutFilter = ccmwStdout.value != null
+            val hasStderrFilter = ccmwStderr.value != null
+            if (purpose == CommandInvocationPurpose.MATCH_FILTER && !(hasStdoutFilter || hasStderrFilter || hasExitCodes)) {
                 throw RuntimeException("No filters are defined for stdio or exit code.")
             }
         }
         val d = tfDependencies.text.replace("\\s".toRegex(), "")
         if (d.isNotEmpty()) addAllRequiredInPath(d.split(','))
-        if (paramsModel.isEmpty) throw RuntimeException("The command must contain at least one argument.")
-        if (paramsModel[0].isEmptyString) throw RuntimeException("The first argument (the command) is an empty string")
-        val params = paramsModel.map(CommandLineParameter::value)
-        addAllPrefix(params.takeWhile(Objects::nonNull))
-        if (prefixCount < paramsModel.size) {
+        val tokens = tokensPanel.tokens()
+        if (tokens.isEmpty()) {
+            throw RuntimeException("The command must contain at least one argument.")
+        }
+        if (tokens.first().isBlank()) {
+            throw RuntimeException("The first argument (the command) cannot be empty.")
+        }
+        val filenameIndices = tokens.withIndex().filter { it.value == INPUT_FILENAME_TOKEN }.map { it.index }
+        if (filenameIndices.size > 1) {
+            throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder may only appear once in the command.")
+        }
+        val placeholderIndex = filenameIndices.firstOrNull()
+        val prefixTokens = if (placeholderIndex != null) tokens.subList(0, placeholderIndex) else tokens
+        addAllPrefix(prefixTokens)
+        if (placeholderIndex != null) {
+            if (placeholderIndex == 0) {
+                throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder must appear after the executable name.")
+            }
             inputMethod = Piper.CommandInvocation.InputMethod.FILENAME
-            addAllPostfix(params.drop(prefixCount + 1))
+            val postfixTokens = if (placeholderIndex + 1 < tokens.size) tokens.subList(placeholderIndex + 1, tokens.size) else emptyList()
+            addAllPostfix(postfixTokens)
         }
         val parameterItems = parameterEditor.items.toList()
         val duplicateNames = parameterItems.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
@@ -834,6 +827,16 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
         addAllParameter(parameterItems)
         if (cbPassHeaders?.isSelected == true) passHeaders = true
     }.build()
+}
+
+private fun toTokenList(ci: Piper.CommandInvocation): List<String> {
+    val tokens = mutableListOf<String>()
+    tokens += ci.prefixList
+    if (ci.inputMethod == Piper.CommandInvocation.InputMethod.FILENAME) {
+        tokens += INPUT_FILENAME_TOKEN
+        tokens += ci.postfixList
+    }
+    return tokens
 }
 
 private class CommandParameterListEditor(
@@ -907,51 +910,6 @@ private class CommandParameterDialog(
     }
 }
 
-private class InputMethodWidget(private val w: Window, private val label: JLabel = JLabel(),
-                                private val button: JButton = JButton(),
-                                private var hasFileName: Boolean) {
-    fun update() {
-        label.text = "Input method: " + (if (hasFileName) "filename" else "standard input") + " "
-        button.text = if (hasFileName) "Set to stdin (remove $CMDLINE_INPUT_FILENAME_PLACEHOLDER)"
-        else "Set to filename (add $CMDLINE_INPUT_FILENAME_PLACEHOLDER)"
-        w.repack()
-    }
-
-    companion object {
-        fun create(w: Window, panel: Container, cs: GridBagConstraints, hasFileName: Boolean, paramsModel: DefaultListModel<CommandLineParameter>): InputMethodWidget {
-            val imw = InputMethodWidget(w = w, hasFileName = hasFileName)
-            imw.update()
-            cs.gridwidth = 2
-            cs.gridx = 0 ; panel.add(imw.label, cs)
-            cs.gridx = 2 ; panel.add(imw.button, cs)
-
-            paramsModel.addListDataListener(object : ListDataListener {
-                override fun intervalRemoved(p0: ListDataEvent?) {
-                    if (!imw.hasFileName || paramsModel.toIterable().any(CommandLineParameter::isInputFileName)) return
-                    imw.hasFileName = false
-                    imw.update()
-                }
-
-                override fun contentsChanged(p0: ListDataEvent?) { /* ignore */ }
-                override fun intervalAdded(p0: ListDataEvent?) { /* ignore */ }
-            })
-
-            imw.button.addActionListener {
-                if (imw.hasFileName) {
-                    val iof = paramsModel.toIterable().indexOfFirst(CommandLineParameter::isInputFileName)
-                    if (iof >= 0) paramsModel.remove(iof) // this triggers intervalRemoved above, no explicit update() necessary
-                } else {
-                    paramsModel.addElement(CommandLineParameter(null))
-                    imw.hasFileName = true
-                    imw.update()
-                }
-            }
-
-            return imw
-        }
-    }
-}
-
 fun <E : Component> addFullWidthComponent(c: E, panel: Container, cs: GridBagConstraints): E {
     cs.gridx = 0
     cs.gridy++
@@ -1005,10 +963,34 @@ class HexASCIITextField(private val tf: JTextField = JTextField(),
         chunked(2, ::parseHexByte).toByteArray()
     }
 
+    fun setValue(source: ByteString) {
+        if (source.isValidUtf8) {
+            tf.text = source.toStringUtf8()
+            rbASCII.isSelected = true
+            rbHex.isSelected = false
+            isASCII = true
+        } else {
+            tf.text = source.toHexPairs()
+            rbHex.isSelected = true
+            rbASCII.isSelected = false
+            isASCII = false
+        }
+    }
+
     fun getByteString(): ByteString = if (isASCII) ByteString.copyFromUtf8(tf.text) else try {
         ByteString.copyFrom(parseHex())
     } catch (e: NumberFormatException) {
         throw RuntimeException("Error in $field field: hexadecimal string ${e.message}")
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        tf.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+        })
+        rbHex.addActionListener { listener() }
+        rbASCII.addActionListener { listener() }
     }
 
     fun addWidgets(caption: String, cs: GridBagConstraints, panel: Container) {
@@ -1034,12 +1016,38 @@ class RegExpWidget(regex: Piper.RegularExpression, panel: Container, cs: GridBag
     fun toRegularExpression(): Piper.RegularExpression {
         return Piper.RegularExpression.newBuilder().setPattern(tfPattern.text).setFlagSet(esw.toSet()).build().apply { compile() }
     }
+
+    fun setValue(regex: Piper.RegularExpression) {
+        tfPattern.text = regex.pattern
+        esw.setSelected(regex.flagSet)
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        tfPattern.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = listener()
+        })
+        esw.addChangeListener(listener)
+    }
 }
 
 class EnumSetWidget<E : Enum<E>>(set: Set<E>, panel: Container, cs: GridBagConstraints, caption: String, enumClass: Class<E>) {
     private val cbMap: Map<E, JCheckBox>
 
     fun toSet(): Set<E> = cbMap.filterValues(JCheckBox::isSelected).keys
+
+    fun setSelected(values: Set<E>) {
+        cbMap.forEach { (flag, checkbox) ->
+            checkbox.isSelected = flag in values
+        }
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        cbMap.values.forEach { checkbox ->
+            checkbox.addActionListener { listener() }
+        }
+    }
 
     init {
         addFullWidthComponent(JLabel(caption), panel, cs)
@@ -1076,122 +1084,230 @@ class CollapsedHeaderMatchWidget(w: Window, hm: Piper.HeaderMatch?) :
         get() = Piper.HeaderMatch.getDefaultInstance()
 }
 
-class MessageMatchDialog(mm: Piper.MessageMatch, private val showHeaderMatch: Boolean, parent: Component) : ConfigDialog<Piper.MessageMatch>(parent, "Filter editor") {
-    private val prefixField  = HexASCIITextField("prefix",  mm.prefix,  this)
-    private val postfixField = HexASCIITextField("postfix", mm.postfix, this)
-    private val cciw = CollapsedCommandInvocationWidget(this, mm.cmd, CommandInvocationPurpose.MATCH_FILTER)
-    private val chmw = CollapsedHeaderMatchWidget(this, mm.header)
-    private val cbNegation = JComboBox(MatchNegation.values())
-    private val regExpWidget: RegExpWidget
-    private val cbInScope: JCheckBox?
-    private val andAlsoPanel = MatchListEditor("All of these apply: [AND]", mm.andAlsoList)
-    private val  orElsePanel = MatchListEditor("Any of these apply: [OR]",  mm.orElseList)
+private class MessageMatchListEditor(
+    caption: String,
+    source: List<Piper.MessageMatch>,
+    private val host: Component?,
+    private val showHeaderMatch: Boolean,
+    private val onChange: () -> Unit,
+) : ClipboardOwner, ListEditor<Piper.MessageMatch>(fillDefaultModel(source), host, caption) {
+    private val btnCopy = JButton("Copy")
+    private val btnPaste = JButton("Paste")
 
     init {
-        cs.gridwidth = 4
+        btnCopy.addActionListener {
+            val value = listWidget.selectedValue ?: return@addActionListener
+            Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                StringSelection(Dump(DumpSettingsBuilder().build()).dumpToString(value.toMap())),
+                this,
+            )
+        }
+        btnPaste.addActionListener {
+            val text = Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String
+                ?: return@addActionListener
+            val loader = Load(LoadSettingsBuilder().build())
+            try {
+                val pasted = messageMatchFromMap(loader.loadFromString(text) as Map<String, Any>)
+                model.addElement(pasted)
+            } catch (e: Exception) {
+                JOptionPane.showMessageDialog(host ?: this, e.message)
+            }
+        }
+        pnToolbar.add(btnCopy)
+        pnToolbar.add(btnPaste)
+        updateCopyButtonState()
+        model.addListDataListener(object : ListDataListener {
+            override fun intervalAdded(e: ListDataEvent?) = onChange()
+            override fun intervalRemoved(e: ListDataEvent?) = onChange()
+            override fun contentsChanged(e: ListDataEvent?) = onChange()
+        })
+    }
 
-        panel.add(cbNegation, cs)
-        cbNegation.selectedItem = if (mm.negation) MatchNegation.NEGATED else MatchNegation.NORMAL
+    override fun addDialog(): Piper.MessageMatch? = MessageMatchDialog(
+        Piper.MessageMatch.getDefaultInstance(),
+        showHeaderMatch = showHeaderMatch,
+        parent = host ?: this,
+    ).showGUI()
+
+    override fun editDialog(value: Piper.MessageMatch): Piper.MessageMatch? = MessageMatchDialog(
+        value,
+        showHeaderMatch = showHeaderMatch,
+        parent = host ?: this,
+    ).showGUI()
+
+    override fun toHumanReadable(value: Piper.MessageMatch): String =
+        value.toHumanReadable(negation = false, hideParentheses = true)
+
+    fun items(): List<Piper.MessageMatch> = model.toIterable().toList()
+
+    fun setItems(items: List<Piper.MessageMatch>) {
+        fillDefaultModel(items, model)
+        onChange()
+    }
+
+    override fun updateBtnEnableDisableState() {
+        super.updateBtnEnableDisableState()
+        updateCopyButtonState()
+    }
+
+    override fun lostOwnership(p0: Clipboard?, p1: Transferable?) {} /* ClipboardOwner */
+
+    private fun updateCopyButtonState() {
+        btnCopy.isEnabled = listWidget.selectedIndices.isNotEmpty()
+    }
+}
+
+private class MessageMatchEditorPanel(
+    private val window: Window,
+    private val parent: Component?,
+    private val showHeaderMatch: Boolean,
+    initial: Piper.MessageMatch,
+) : JPanel(GridBagLayout()) {
+    private val changeListeners = mutableListOf<() -> Unit>()
+    private val cbNegation = JComboBox(MatchNegation.values())
+    private val prefixField = HexASCIITextField("prefix", initial.prefix, window)
+    private val postfixField = HexASCIITextField("postfix", initial.postfix, window)
+    private val regExpWidget: RegExpWidget
+    private val chmw = if (showHeaderMatch) CollapsedHeaderMatchWidget(window, initial.header) else null
+    private val cciw = CollapsedCommandInvocationWidget(window, initial.cmd, CommandInvocationPurpose.MATCH_FILTER)
+    private val cbInScope: JCheckBox?
+    private val andAlsoPanel = MessageMatchListEditor(
+        "All of these apply: [AND]",
+        initial.andAlsoList,
+        parent,
+        showHeaderMatch,
+        ::emitChange,
+    )
+    private val orElsePanel = MessageMatchListEditor(
+        "Any of these apply: [OR]",
+        initial.orElseList,
+        parent,
+        showHeaderMatch,
+        ::emitChange,
+    )
+    private var suppressChanges = false
+
+    init {
+        val cs = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            gridwidth = 4
+            fill = GridBagConstraints.HORIZONTAL
+            anchor = GridBagConstraints.WEST
+        }
+
+        add(cbNegation, cs)
+        cbNegation.selectedItem = if (initial.negation) MatchNegation.NEGATED else MatchNegation.NORMAL
+        cbNegation.addActionListener { emitChange() }
 
         cs.gridwidth = 1
 
-        prefixField .addWidgets("Starts with: ", cs, panel)
-        postfixField.addWidgets(  "Ends with: ", cs, panel)
-        regExpWidget = RegExpWidget(mm.regex, panel, cs)
+        prefixField.addWidgets("Starts with: ", cs, this)
+        postfixField.addWidgets("Ends with: ", cs, this)
+        regExpWidget = RegExpWidget(initial.regex, this, cs)
 
-        if (showHeaderMatch) chmw.buildGUI(panel, cs)
+        if (showHeaderMatch) {
+            chmw!!.buildGUI(this, cs)
+            chmw.addChangeListener(object : ChangeListener<Piper.HeaderMatch> {
+                override fun valueChanged(value: Piper.HeaderMatch?) {
+                    emitChange()
+                }
+            })
+        }
 
-        cciw.buildGUI(panel, cs)
+        cciw.buildGUI(this, cs)
+        cciw.addChangeListener(object : ChangeListener<Piper.CommandInvocation> {
+            override fun valueChanged(value: Piper.CommandInvocation?) {
+                emitChange()
+            }
+        })
 
-        cbInScope = if (showHeaderMatch) createFullWidthCheckBox("request is in Burp Suite scope", mm.inScope, panel, cs) else null
+        cbInScope = if (showHeaderMatch) createFullWidthCheckBox("request is in Burp Suite scope", initial.inScope, this, cs) else null
+        cbInScope?.addActionListener { emitChange() }
 
         val spList = JSplitPane()
         spList.leftComponent = andAlsoPanel
         spList.rightComponent = orElsePanel
 
-        addFullWidthComponent(spList, panel, cs)
+        addFullWidthComponent(spList, this, cs)
 
-        cs.gridy++
+        prefixField.addChangeListener { emitChange() }
+        postfixField.addChangeListener { emitChange() }
+        regExpWidget.addChangeListener { emitChange() }
     }
 
-    override fun processGUI(): Piper.MessageMatch {
-        val builder = Piper.MessageMatch.newBuilder()
+    fun setValue(match: Piper.MessageMatch) {
+        suppressChanges = true
+        cbNegation.selectedItem = if (match.negation) MatchNegation.NEGATED else MatchNegation.NORMAL
+        prefixField.setValue(match.prefix)
+        postfixField.setValue(match.postfix)
+        if (match.hasRegex()) {
+            regExpWidget.setValue(match.regex)
+        } else {
+            regExpWidget.setValue(Piper.RegularExpression.getDefaultInstance())
+        }
+        if (showHeaderMatch) {
+            chmw!!.value = match.header
+        }
+        cciw.value = match.cmd
+        cbInScope?.isSelected = match.inScope
+        andAlsoPanel.setItems(match.andAlsoList)
+        orElsePanel.setItems(match.orElseList)
+        suppressChanges = false
+    }
 
+    fun toMessageMatch(): Piper.MessageMatch {
+        val builder = Piper.MessageMatch.newBuilder()
         if ((cbNegation.selectedItem as MatchNegation).negation) builder.negation = true
 
         builder.postfix = postfixField.getByteString()
-        builder.prefix  =  prefixField.getByteString()
+        builder.prefix = prefixField.getByteString()
 
         if (regExpWidget.hasPattern()) builder.regex = regExpWidget.toRegularExpression()
-
-        if (chmw.value != null) builder.header = chmw.value
-
-        if (cbInScope != null && cbInScope.isSelected) builder.inScope = true
+        if (showHeaderMatch && chmw!!.value != null) builder.header = chmw.value
+        if (cbInScope?.isSelected == true) builder.inScope = true
 
         val cmd = cciw.value
         if (cmd != null) {
             try {
                 cmd.checkDependencies()
             } catch (c: DependencyException) {
-                if (JOptionPane.showConfirmDialog(panel, "${c.message}\n\nAre you sure you want to save this?",
-                                "Confirmation", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) throw CancelClosingWindow()
+                if (JOptionPane.showConfirmDialog(
+                        parent,
+                        "${c.message}\n\nAre you sure you want to save this?",
+                        "Confirmation",
+                        JOptionPane.YES_NO_OPTION,
+                    ) != JOptionPane.YES_OPTION
+                ) throw CancelClosingWindow()
             }
             builder.cmd = cmd
         }
 
-        builder.addAllAndAlso(andAlsoPanel.items)
-        builder.addAllOrElse ( orElsePanel.items)
-
+        builder.addAllAndAlso(andAlsoPanel.items())
+        builder.addAllOrElse(orElsePanel.items())
         return builder.build()
     }
 
-    inner class MatchListEditor(caption: String, source: List<Piper.MessageMatch>) : ClipboardOwner,
-            ListEditor<Piper.MessageMatch>(fillDefaultModel(source), this, caption) {
-        override fun addDialog(): Piper.MessageMatch? = MessageMatchDialog(Piper.MessageMatch.getDefaultInstance(),
-                showHeaderMatch = showHeaderMatch, parent = this).showGUI()
-
-        override fun editDialog(value: Piper.MessageMatch): Piper.MessageMatch? =
-                MessageMatchDialog(value, showHeaderMatch = showHeaderMatch, parent = this).showGUI()
-
-        override fun toHumanReadable(value: Piper.MessageMatch): String =
-                value.toHumanReadable(negation = false, hideParentheses = true)
-
-        val items: Iterable<Piper.MessageMatch>
-            get() = model.toIterable()
-
-        private val btnCopy = JButton("Copy")
-        private val btnPaste = JButton("Paste")
-
-        override fun updateBtnEnableDisableState() {
-            super.updateBtnEnableDisableState()
-            updateEnableDisableBtnState()
-        }
-
-        private fun updateEnableDisableBtnState() {
-            btnCopy.isEnabled = listWidget.selectedIndices.isNotEmpty()
-        }
-
-        init {
-            btnCopy.addActionListener {
-                Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(
-                        Dump(DumpSettingsBuilder().build()).dumpToString(listWidget.selectedValue.toMap())), this)
-            }
-            btnPaste.addActionListener {
-                val s = Toolkit.getDefaultToolkit().systemClipboard.getData(DataFlavor.stringFlavor) as? String ?: return@addActionListener
-                val ls = Load(LoadSettingsBuilder().build())
-                try {
-                    model.addElement(messageMatchFromMap(ls.loadFromString(s) as Map<String, Any>))
-                } catch (e: Exception) {
-                    JOptionPane.showMessageDialog(this, e.message)
-                }
-            }
-            pnToolbar.add(btnCopy)
-            pnToolbar.add(btnPaste)
-            updateEnableDisableBtnState()
-        }
-
-        override fun lostOwnership(p0: Clipboard?, p1: Transferable?) {} /* ClipboardOwner */
+    fun addChangeListener(listener: () -> Unit) {
+        changeListeners += listener
     }
+
+    private fun emitChange() {
+        if (!suppressChanges) {
+            changeListeners.forEach { it.invoke() }
+        }
+    }
+}
+
+class MessageMatchDialog(mm: Piper.MessageMatch, private val showHeaderMatch: Boolean, parent: Component) : ConfigDialog<Piper.MessageMatch>(parent, "Filter editor") {
+    private val editor = MessageMatchEditorPanel(this, parent, showHeaderMatch, mm)
+
+    init {
+        addFullWidthComponent(editor, panel, cs)
+        cs.gridy++
+    }
+
+    override fun processGUI(): Piper.MessageMatch = editor.toMessageMatch()
 }
 
 fun <E> createRemoveButton(listWidget: JList<E>, listModel: DefaultListModel<E>): JButton {

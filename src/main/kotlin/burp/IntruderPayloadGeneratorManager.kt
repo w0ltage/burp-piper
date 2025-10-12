@@ -54,8 +54,6 @@ import javax.swing.event.DocumentListener
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 import javax.swing.table.AbstractTableModel
-
-private const val INPUT_FILENAME_TOKEN = "<INPUT>"
 private const val DEFAULT_SAMPLE_INPUT = "GET /example HTTP/1.1\nHost: example.com\n\n"
 
 data class GeneratorEditorState(
@@ -478,7 +476,7 @@ private class GeneratorEditorPanel(
     ) { state ->
         renderGeneratorOverview(state)
     }
-    private val commandTab = CommandEditorPanel { markDirty() }
+    private val commandTab = CommandTokensPanel(onChange = { markDirty() })
     private val inputTab = InputMethodPanel { markDirty() }
     private val historyTab = HistoryPanel()
     private lateinit var validationTab: ValidationTestPanel
@@ -662,142 +660,6 @@ private class GeneratorEditorPanel(
         if (!loading) {
             saveButton.isEnabled = true
         }
-    }
-}
-
-private class CommandEditorPanel(
-    private val onChange: () -> Unit,
-) : JPanel(BorderLayout()) {
-
-    private val tokensModel = DefaultListModel<String>()
-    private val tokensList = JList(tokensModel)
-    private val tokenField = JTextField()
-
-    init {
-        border = EmptyBorder(8, 8, 8, 8)
-        val title = JLabel("Command tokens")
-        title.font = title.font.deriveFont(Font.BOLD)
-        add(title, BorderLayout.NORTH)
-        tokensList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        tokensList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2) {
-                    val index = tokensList.locationToIndex(e.point)
-                    if (index >= 0) {
-                        val current = tokensModel[index]
-                        val edited = JOptionPane.showInputDialog(this@CommandEditorPanel, "Edit token", current) ?: return
-                        tokensModel[index] = edited
-                        onChange()
-                    }
-                }
-            }
-        })
-        add(JScrollPane(tokensList), BorderLayout.CENTER)
-
-        val footer = JPanel()
-        footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
-        val addRow = JPanel()
-        addRow.layout = BoxLayout(addRow, BoxLayout.X_AXIS)
-        tokenField.columns = 20
-        addRow.add(tokenField)
-        val addButton = JButton("Add")
-        addButton.addActionListener {
-            val text = tokenField.text
-            if (text.isNotEmpty()) {
-                tokensModel.addElement(text)
-                tokenField.text = ""
-                onChange()
-            }
-        }
-        addRow.add(Box.createRigidArea(Dimension(4, 0)))
-        addRow.add(addButton)
-        val placeholderButton = JButton("Add placeholder")
-        placeholderButton.addActionListener { showPlaceholderMenu(placeholderButton) }
-        addRow.add(Box.createRigidArea(Dimension(4, 0)))
-        addRow.add(placeholderButton)
-        addRow.add(Box.createHorizontalGlue())
-        footer.add(addRow)
-
-        val actions = JPanel()
-        actions.layout = BoxLayout(actions, BoxLayout.X_AXIS)
-        val remove = JButton("Remove")
-        remove.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0) {
-                tokensModel.remove(idx)
-                onChange()
-            }
-        }
-        val wrap = JButton("Wrap in quotes")
-        wrap.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0) {
-                tokensModel[idx] = "\"${tokensModel[idx]}\""
-                onChange()
-            }
-        }
-        val moveUp = JButton("Move up")
-        moveUp.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx > 0) {
-                val value = tokensModel.remove(idx)
-                tokensModel.add(idx - 1, value)
-                tokensList.selectedIndex = idx - 1
-                onChange()
-            }
-        }
-        val moveDown = JButton("Move down")
-        moveDown.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0 && idx < tokensModel.size() - 1) {
-                val value = tokensModel.remove(idx)
-                tokensModel.add(idx + 1, value)
-                tokensList.selectedIndex = idx + 1
-                onChange()
-            }
-        }
-        actions.add(remove)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(wrap)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(moveUp)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(moveDown)
-        actions.add(Box.createHorizontalGlue())
-        footer.add(Box.createRigidArea(Dimension(0, 6)))
-        footer.add(actions)
-
-        footer.add(Box.createRigidArea(Dimension(0, 6)))
-        val help = JLabel("Use placeholders like \"\${dialog0}\". ${INPUT_FILENAME_TOKEN} inserts the temp file when using filename mode.")
-        footer.add(help)
-
-        add(footer, BorderLayout.SOUTH)
-    }
-
-    fun setTokens(tokens: List<String>) {
-        tokensModel.clear()
-        tokens.forEach(tokensModel::addElement)
-    }
-
-    fun tokens(): List<String> = (0 until tokensModel.size()).map(tokensModel::getElementAt)
-
-    private fun showPlaceholderMenu(anchor: Component) {
-        val menu = JPopupMenu()
-        listOf(
-            "\${BASE}",
-            "\${PAYLOAD_INDEX}",
-            "\${dialog0}",
-            "\${domain}",
-            INPUT_FILENAME_TOKEN,
-        ).forEach { placeholder ->
-            menu.add(JMenuItem(placeholder).apply {
-                addActionListener {
-                    tokensModel.addElement(placeholder)
-                    onChange()
-                }
-            })
-        }
-        menu.show(anchor, 0, anchor.height)
     }
 }
 
