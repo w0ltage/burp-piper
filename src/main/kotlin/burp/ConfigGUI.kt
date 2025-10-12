@@ -186,44 +186,116 @@ fun <E> JList<E>.addDoubleClickListener(listener: (Int) -> Unit) {
 
 class CancelClosingWindow : RuntimeException()
 
-class MinimalToolWidget(tool: Piper.MinimalTool, private val panel: Container, cs: GridBagConstraints, w: Window,
-                        showPassHeaders: Boolean, purpose: CommandInvocationPurpose, showScope: Boolean, showFilter: Boolean) {
-    private val tfName = createLabeledTextField("Name: ", tool.name, panel, cs)
-    private val lsScope: JComboBox<ConfigMinimalToolScope>? = if (showScope) createLabeledWidget("Can handle... ",
-            JComboBox(ConfigMinimalToolScope.values()).apply { selectedItem = ConfigMinimalToolScope.fromScope(tool.scope) }, panel, cs) else null
-    private val cbEnabled: JCheckBox
-    private val cciw: CollapsedCommandInvocationWidget = CollapsedCommandInvocationWidget(w, cmd = tool.cmd, purpose = purpose, showPassHeaders = showPassHeaders)
-    private val ccmw: CollapsedMessageMatchWidget = CollapsedMessageMatchWidget(w, mm = tool.filter, showHeaderMatch = true, caption = "Filter: ")
+class MinimalToolWidget(
+    tool: Piper.MinimalTool,
+    private val panel: Container,
+    cs: GridBagConstraints,
+    parent: Window,
+    showPassHeaders: Boolean,
+    private val purpose: CommandInvocationPurpose,
+    private val showScope: Boolean,
+    showFilter: Boolean,
+) {
+    private val nameField = JTextField(tool.name, 24)
+    private val enabledCheck = JCheckBox("Enabled", tool.enabled)
+    private val scopeCombo: JComboBox<ConfigMinimalToolScope>? = if (showScope) {
+        JComboBox(ConfigMinimalToolScope.values()).apply {
+            selectedItem = ConfigMinimalToolScope.fromScope(tool.scope)
+        }
+    } else null
+    private val filterPanel = if (showFilter) MessageMatchInlinePanel(parent) else null
+    private val commandEditor = CommandInvocationEditor(parent, purpose, showPassHeaders = showPassHeaders, showDependenciesField = true)
+    private val tabs = JTabbedPane()
+
+    init {
+        commandEditor.display(tool.cmd)
+        filterPanel?.setValue(tool.filter)
+        tabs.addTab("General", buildGeneralTab())
+        filterPanel?.let { panel ->
+            val container = JPanel(BorderLayout())
+            container.add(panel, BorderLayout.NORTH)
+            tabs.addTab("Filter", JScrollPane(container))
+        }
+        tabs.addTab("Command", commandEditor)
+        cs.gridwidth = 4
+        cs.fill = GridBagConstraints.BOTH
+        cs.weightx = 1.0
+        cs.weighty = 1.0
+        panel.add(tabs, cs)
+        cs.gridy += 1
+        cs.weighty = 0.0
+        cs.fill = GridBagConstraints.HORIZONTAL
+    }
+
+    private fun buildGeneralTab(): JComponent {
+        val container = JPanel(GridBagLayout())
+        val constraints = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(8, 8, 8, 8)
+        }
+        container.add(JLabel("Name"), constraints)
+        constraints.gridx = 1
+        constraints.weightx = 1.0
+        constraints.fill = GridBagConstraints.HORIZONTAL
+        container.add(nameField, constraints)
+        constraints.gridx = 0
+        constraints.gridy++
+        constraints.gridwidth = 2
+        container.add(enabledCheck, constraints)
+        scopeCombo?.let { combo ->
+            constraints.gridy++
+            constraints.gridwidth = 1
+            container.add(JLabel("Can handle..."), constraints)
+            constraints.gridx = 1
+            container.add(combo, constraints)
+            constraints.gridx = 0
+            constraints.gridwidth = 2
+        }
+        return container
+    }
 
     fun toMinimalTool(): Piper.MinimalTool {
-        if (tfName.text.isEmpty()) throw RuntimeException("Name cannot be empty.")
-        val command = cciw.value ?: throw RuntimeException("Command must be specified")
+        val name = nameField.text.trim()
+        if (name.isEmpty()) throw RuntimeException("Name cannot be empty.")
+        val command = try {
+            commandEditor.snapshot()
+        } catch (ex: Exception) {
+            throw RuntimeException(ex.message ?: "Command configuration is invalid", ex)
+        }
         try {
-            if (cbEnabled.isSelected) command.checkDependencies()
+            if (enabledCheck.isSelected) command.checkDependencies()
         } catch (c: DependencyException) {
             when (JOptionPane.showConfirmDialog(panel, "${c.message}\n\nAre you sure you want this enabled?")) {
-                JOptionPane.NO_OPTION -> cbEnabled.isSelected = false
+                JOptionPane.NO_OPTION -> enabledCheck.isSelected = false
                 JOptionPane.CANCEL_OPTION -> throw CancelClosingWindow()
             }
         }
 
         return Piper.MinimalTool.newBuilder().apply {
-            name = tfName.text
-            if (cbEnabled.isSelected) enabled = true
-            if (ccmw.value != null) filter = ccmw.value
-            if (lsScope != null) scope = (lsScope.selectedItem as ConfigMinimalToolScope).scope
+            this.name = name
+            if (enabledCheck.isSelected) this.enabled = true
+            filterPanel?.toMessageMatch()?.let { this.filter = it }
+            if (scopeCombo != null) {
+                scope = (scopeCombo.selectedItem as ConfigMinimalToolScope).scope
+            }
             cmd = command
         }.build()
     }
 
     fun addFilterChangeListener(listener: ChangeListener<Piper.MessageMatch>) {
-        ccmw.addChangeListener(listener)
+        filterPanel?.addChangeListener {
+            listener.valueChanged(filterPanel.toMessageMatch())
+        }
     }
 
-    init {
-        if (showFilter) ccmw.buildGUI(panel, cs)
-        cciw.buildGUI(panel, cs)
-        cbEnabled = createFullWidthCheckBox("Enabled", tool.enabled, panel, cs)
+    fun addCommandChangeListener(listener: () -> Unit) {
+        commandEditor.addChangeListener(listener)
+    }
+
+    fun addCustomTab(title: String, component: Component) {
+        tabs.addTab(title, component)
     }
 }
 

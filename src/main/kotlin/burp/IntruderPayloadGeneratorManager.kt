@@ -55,7 +55,6 @@ import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 import javax.swing.table.AbstractTableModel
 
-private const val INPUT_FILENAME_TOKEN = "<INPUT>"
 private const val DEFAULT_SAMPLE_INPUT = "GET /example HTTP/1.1\nHost: example.com\n\n"
 
 data class GeneratorEditorState(
@@ -70,15 +69,6 @@ data class GeneratorEditorState(
     var passHeaders: Boolean = false,
     var exitCodes: MutableList<Int> = mutableListOf(),
     var dependencies: MutableList<String> = mutableListOf(),
-)
-
-data class ParameterState(
-    var name: String,
-    var label: String,
-    var defaultValue: String,
-    var required: Boolean,
-    var type: ParameterInputType,
-    var description: String,
 )
 
 data class TestRunEntry(
@@ -479,7 +469,7 @@ private class GeneratorEditorPanel(
         renderGeneratorOverview(state)
     }
     private val commandTab = CommandEditorPanel { markDirty() }
-    private val inputTab = InputMethodPanel { markDirty() }
+    private val inputTab = InputMethodPanel(showPassHeaders = true) { markDirty() }
     private val historyTab = HistoryPanel()
     private lateinit var validationTab: ValidationTestPanel
     private lateinit var parametersTab: ParameterEditorPanel
@@ -665,385 +655,6 @@ private class GeneratorEditorPanel(
     }
 }
 
-private class CommandEditorPanel(
-    private val onChange: () -> Unit,
-) : JPanel(BorderLayout()) {
-
-    private val tokensModel = DefaultListModel<String>()
-    private val tokensList = JList(tokensModel)
-    private val tokenField = JTextField()
-
-    init {
-        border = EmptyBorder(8, 8, 8, 8)
-        val title = JLabel("Command tokens")
-        title.font = title.font.deriveFont(Font.BOLD)
-        add(title, BorderLayout.NORTH)
-        tokensList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        tokensList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2) {
-                    val index = tokensList.locationToIndex(e.point)
-                    if (index >= 0) {
-                        val current = tokensModel[index]
-                        val edited = JOptionPane.showInputDialog(this@CommandEditorPanel, "Edit token", current) ?: return
-                        tokensModel[index] = edited
-                        onChange()
-                    }
-                }
-            }
-        })
-        add(JScrollPane(tokensList), BorderLayout.CENTER)
-
-        val footer = JPanel()
-        footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
-        val addRow = JPanel()
-        addRow.layout = BoxLayout(addRow, BoxLayout.X_AXIS)
-        tokenField.columns = 20
-        addRow.add(tokenField)
-        val addButton = JButton("Add")
-        addButton.addActionListener {
-            val text = tokenField.text
-            if (text.isNotEmpty()) {
-                tokensModel.addElement(text)
-                tokenField.text = ""
-                onChange()
-            }
-        }
-        addRow.add(Box.createRigidArea(Dimension(4, 0)))
-        addRow.add(addButton)
-        val placeholderButton = JButton("Add placeholder")
-        placeholderButton.addActionListener { showPlaceholderMenu(placeholderButton) }
-        addRow.add(Box.createRigidArea(Dimension(4, 0)))
-        addRow.add(placeholderButton)
-        addRow.add(Box.createHorizontalGlue())
-        footer.add(addRow)
-
-        val actions = JPanel()
-        actions.layout = BoxLayout(actions, BoxLayout.X_AXIS)
-        val remove = JButton("Remove")
-        remove.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0) {
-                tokensModel.remove(idx)
-                onChange()
-            }
-        }
-        val wrap = JButton("Wrap in quotes")
-        wrap.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0) {
-                tokensModel[idx] = "\"${tokensModel[idx]}\""
-                onChange()
-            }
-        }
-        val moveUp = JButton("Move up")
-        moveUp.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx > 0) {
-                val value = tokensModel.remove(idx)
-                tokensModel.add(idx - 1, value)
-                tokensList.selectedIndex = idx - 1
-                onChange()
-            }
-        }
-        val moveDown = JButton("Move down")
-        moveDown.addActionListener {
-            val idx = tokensList.selectedIndex
-            if (idx >= 0 && idx < tokensModel.size() - 1) {
-                val value = tokensModel.remove(idx)
-                tokensModel.add(idx + 1, value)
-                tokensList.selectedIndex = idx + 1
-                onChange()
-            }
-        }
-        actions.add(remove)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(wrap)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(moveUp)
-        actions.add(Box.createRigidArea(Dimension(4, 0)))
-        actions.add(moveDown)
-        actions.add(Box.createHorizontalGlue())
-        footer.add(Box.createRigidArea(Dimension(0, 6)))
-        footer.add(actions)
-
-        footer.add(Box.createRigidArea(Dimension(0, 6)))
-        val help = JLabel("Use placeholders like \"\${dialog0}\". ${INPUT_FILENAME_TOKEN} inserts the temp file when using filename mode.")
-        footer.add(help)
-
-        add(footer, BorderLayout.SOUTH)
-    }
-
-    fun setTokens(tokens: List<String>) {
-        tokensModel.clear()
-        tokens.forEach(tokensModel::addElement)
-    }
-
-    fun tokens(): List<String> = (0 until tokensModel.size()).map(tokensModel::getElementAt)
-
-    private fun showPlaceholderMenu(anchor: Component) {
-        val menu = JPopupMenu()
-        listOf(
-            "\${BASE}",
-            "\${PAYLOAD_INDEX}",
-            "\${dialog0}",
-            "\${domain}",
-            INPUT_FILENAME_TOKEN,
-        ).forEach { placeholder ->
-            menu.add(JMenuItem(placeholder).apply {
-                addActionListener {
-                    tokensModel.addElement(placeholder)
-                    onChange()
-                }
-            })
-        }
-        menu.show(anchor, 0, anchor.height)
-    }
-}
-
-private class ParameterEditorPanel(
-    private val onChange: () -> Unit,
-) : JPanel(BorderLayout()) {
-
-    private val model = ParameterTableModel()
-    private val table = JTable(model)
-
-    init {
-        border = EmptyBorder(8, 8, 8, 8)
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
-        table.autoResizeMode = JTable.AUTO_RESIZE_LAST_COLUMN
-        table.rowHeight = 24
-        table.columnModel.getColumn(4).cellEditor = javax.swing.DefaultCellEditor(JCheckBox())
-        val typeColumn = table.columnModel.getColumn(2)
-        val typeBox = JComboBox(ParameterInputType.values())
-        typeColumn.cellEditor = javax.swing.DefaultCellEditor(typeBox)
-        add(JScrollPane(table), BorderLayout.CENTER)
-
-        val footer = JPanel()
-        footer.layout = BoxLayout(footer, BoxLayout.X_AXIS)
-        val addButton = JButton("Add parameter")
-        addButton.addActionListener {
-            val index = model.addRow()
-            table.selectionModel.setSelectionInterval(index, index)
-            onChange()
-        }
-        val removeButton = JButton("Remove")
-        removeButton.addActionListener {
-            val idx = table.selectedRow
-            if (idx >= 0) {
-                model.removeRow(idx)
-                onChange()
-            }
-        }
-        val moveUp = JButton("Move up")
-        moveUp.addActionListener {
-            val idx = table.selectedRow
-            if (idx > 0) {
-                model.swap(idx, idx - 1)
-                table.selectionModel.setSelectionInterval(idx - 1, idx - 1)
-                onChange()
-            }
-        }
-        val moveDown = JButton("Move down")
-        moveDown.addActionListener {
-            val idx = table.selectedRow
-            if (idx >= 0 && idx < model.rowCount - 1) {
-                model.swap(idx, idx + 1)
-                table.selectionModel.setSelectionInterval(idx + 1, idx + 1)
-                onChange()
-            }
-        }
-        footer.add(addButton)
-        footer.add(Box.createRigidArea(Dimension(4, 0)))
-        footer.add(removeButton)
-        footer.add(Box.createRigidArea(Dimension(4, 0)))
-        footer.add(moveUp)
-        footer.add(Box.createRigidArea(Dimension(4, 0)))
-        footer.add(moveDown)
-        footer.add(Box.createHorizontalGlue())
-        val hint = JLabel("Use \${name} in the command to substitute the prompt value.")
-        footer.add(hint)
-        add(footer, BorderLayout.SOUTH)
-    }
-
-    fun setParameters(parameters: List<ParameterState>) {
-        model.setParameters(parameters)
-    }
-
-    val parameters: List<ParameterState>
-        get() = model.getParameters()
-}
-
-private class ParameterTableModel : AbstractTableModel() {
-    private val data = mutableListOf<ParameterState>()
-
-    override fun getRowCount(): Int = data.size
-
-    override fun getColumnCount(): Int = 6
-
-    override fun getColumnName(column: Int): String = when (column) {
-        0 -> "Placeholder"
-        1 -> "Prompt label"
-        2 -> "Type"
-        3 -> "Default"
-        4 -> "Required"
-        else -> "Description"
-    }
-
-    override fun getColumnClass(columnIndex: Int): Class<*> = when (columnIndex) {
-        2 -> ParameterInputType::class.java
-        4 -> java.lang.Boolean::class.java
-        else -> String::class.java
-    }
-
-    override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = true
-
-    override fun getValueAt(rowIndex: Int, columnIndex: Int): Any = when (columnIndex) {
-        0 -> data[rowIndex].name
-        1 -> data[rowIndex].label
-        2 -> data[rowIndex].type
-        3 -> data[rowIndex].defaultValue
-        4 -> data[rowIndex].required
-        else -> data[rowIndex].description
-    }
-
-    override fun setValueAt(aValue: Any?, rowIndex: Int, columnIndex: Int) {
-        val row = data[rowIndex]
-        when (columnIndex) {
-            0 -> row.name = aValue?.toString().orEmpty()
-            1 -> row.label = aValue?.toString().orEmpty()
-            2 -> row.type = aValue as? ParameterInputType ?: ParameterInputType.TEXT
-            3 -> row.defaultValue = aValue?.toString().orEmpty()
-            4 -> row.required = (aValue as? Boolean) ?: false
-            5 -> row.description = aValue?.toString().orEmpty()
-        }
-        fireTableRowsUpdated(rowIndex, rowIndex)
-    }
-
-    fun setParameters(parameters: List<ParameterState>) {
-        data.clear()
-        parameters.forEach { data += it.copy() }
-        fireTableDataChanged()
-    }
-
-    fun getParameters(): List<ParameterState> = data.map { it.copy() }
-
-    fun addRow(): Int {
-        val nextIndex = data.size
-        data += ParameterState(
-            name = "dialog${nextIndex}",
-            label = "Prompt ${nextIndex + 1}",
-            defaultValue = "",
-            required = false,
-            type = ParameterInputType.TEXT,
-            description = "",
-        )
-        fireTableRowsInserted(nextIndex, nextIndex)
-        return nextIndex
-    }
-
-    fun removeRow(index: Int) {
-        if (index in data.indices) {
-            data.removeAt(index)
-            fireTableDataChanged()
-        }
-    }
-
-    fun swap(i: Int, j: Int) {
-        if (i in data.indices && j in data.indices) {
-            val tmp = data[i]
-            data[i] = data[j]
-            data[j] = tmp
-            fireTableRowsUpdated(minOf(i, j), maxOf(i, j))
-        }
-    }
-}
-
-private data class InputSnapshot(
-    val method: Piper.CommandInvocation.InputMethod,
-    val exitCodes: List<Int>,
-    val passHeaders: Boolean,
-)
-
-private class InputMethodPanel(
-    private val onChange: () -> Unit,
-) : JPanel() {
-
-    private val stdinButton = JToggleButton("Use stdin")
-    private val filenameButton = JToggleButton("Use filename")
-    private val exitCodesField = JTextField()
-    private val passHeadersBox = JCheckBox("Pass HTTP headers to command")
-
-    init {
-        layout = GridBagLayout()
-        border = EmptyBorder(8, 8, 8, 8)
-        val constraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = 0
-            anchor = GridBagConstraints.WEST
-            insets = Insets(4, 4, 4, 4)
-        }
-        stdinButton.addActionListener {
-            if (stdinButton.isSelected) {
-                filenameButton.isSelected = false
-            } else {
-                stdinButton.isSelected = true
-            }
-            onChange()
-        }
-        filenameButton.addActionListener {
-            if (filenameButton.isSelected) {
-                stdinButton.isSelected = false
-            } else {
-                filenameButton.isSelected = true
-            }
-            onChange()
-        }
-        stdinButton.isSelected = true
-        add(stdinButton, constraints)
-        constraints.gridx = 1
-        add(filenameButton, constraints)
-        constraints.gridx = 0
-        constraints.gridy = 1
-        constraints.gridwidth = 2
-        val hint = JLabel("For filename mode include ${INPUT_FILENAME_TOKEN} in the command where the temp file should appear.")
-        add(hint, constraints)
-
-        constraints.gridy = 2
-        constraints.gridwidth = 1
-        add(JLabel("Success exit codes:"), constraints)
-        constraints.gridx = 1
-        exitCodesField.columns = 16
-        add(exitCodesField, constraints)
-        exitCodesField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-
-        constraints.gridx = 0
-        constraints.gridy = 3
-        constraints.gridwidth = 2
-        passHeadersBox.addActionListener { onChange() }
-        add(passHeadersBox, constraints)
-    }
-
-    fun setInputMethod(
-        method: Piper.CommandInvocation.InputMethod,
-        exitCodes: List<Int>,
-        passHeaders: Boolean,
-    ) {
-        stdinButton.isSelected = method == Piper.CommandInvocation.InputMethod.STDIN
-        filenameButton.isSelected = method == Piper.CommandInvocation.InputMethod.FILENAME
-        exitCodesField.text = exitCodes.joinToString(", ")
-        passHeadersBox.isSelected = passHeaders
-    }
-
-    fun snapshot(): InputSnapshot {
-        val method = if (filenameButton.isSelected) Piper.CommandInvocation.InputMethod.FILENAME else Piper.CommandInvocation.InputMethod.STDIN
-        val exitCodes = exitCodesField.text.split(',').mapNotNull {
-            it.trim().takeIf(String::isNotEmpty)?.toIntOrNull()
-        }
-        return InputSnapshot(method, exitCodes, passHeadersBox.isSelected)
-    }
-}
-
 private class ValidationTestPanel(
     private val parent: Component?,
     private val toolSupplier: () -> Piper.MinimalTool?,
@@ -1223,39 +834,13 @@ private class HistoryPanel : JPanel(BorderLayout()) {
     }
 }
 
-private fun ParameterState.toProtoParameter(): Piper.CommandInvocation.Parameter {
-    val builder = Piper.CommandInvocation.Parameter.newBuilder()
-        .setName(name)
-        .setLabel(label)
-        .setDefaultValue(defaultValue)
-    if (required) builder.required = true
-    val metadata = GeneratorParameterMetadata(type, description)
-    val encoded = encodeParameterMetadata(metadata)
-    if (encoded.isNotEmpty()) {
-        builder.description = encoded
-    }
-    return builder.build()
-}
-
-private fun Piper.CommandInvocation.Parameter.toParameterState(): ParameterState {
-    val metadata = decodeParameterMetadata(description)
-    return ParameterState(
-        name = name,
-        label = label.orEmpty(),
-        defaultValue = defaultValue.orEmpty(),
-        required = required,
-        type = metadata.type,
-        description = metadata.description,
-    )
-}
-
 private fun Piper.MinimalTool.toEditorState(index: Int? = null): GeneratorEditorState {
     val state = GeneratorEditorState()
     state.modelIndex = index
     state.name = name
     state.enabled = enabled
     state.tags = cmd.extractTags().toMutableList()
-    state.commandTokens = buildTokenList()
+    state.commandTokens = cmd.buildTokenList()
     state.inputMethod = cmd.inputMethod
     state.parameters = cmd.parameterList.map { it.toParameterState() }.toMutableList()
     state.passHeaders = cmd.passHeaders
@@ -1272,45 +857,14 @@ private fun GeneratorEditorState.toMinimalTool(): Piper.MinimalTool {
     val commandBuilder = Piper.CommandInvocation.newBuilder()
         .setInputMethod(inputMethod)
         .setPassHeaders(passHeaders)
-        .addAllPrefix(prefixTokens())
-        .addAllPostfix(postfixTokens())
+        .addAllPrefix(commandTokens.prefixTokens(inputMethod))
+        .addAllPostfix(commandTokens.postfixTokens(inputMethod))
         .addAllExitCode(exitCodes)
         .addAllParameter(parameters.map { it.toProtoParameter() })
         .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
     builder.cmd = commandBuilder.build()
     return builder.build()
 }
-
-private fun GeneratorEditorState.prefixTokens(): List<String> =
-    if (inputMethod == Piper.CommandInvocation.InputMethod.FILENAME) {
-        val placeholderIndex = commandTokens.indexOf(INPUT_FILENAME_TOKEN)
-        if (placeholderIndex >= 0) commandTokens.subList(0, placeholderIndex) else commandTokens
-    } else {
-        commandTokens
-    }
-
-private fun GeneratorEditorState.postfixTokens(): List<String> =
-    if (inputMethod == Piper.CommandInvocation.InputMethod.FILENAME) {
-        val placeholderIndex = commandTokens.indexOf(INPUT_FILENAME_TOKEN)
-        if (placeholderIndex >= 0 && placeholderIndex + 1 <= commandTokens.size - 1) {
-            commandTokens.subList(placeholderIndex + 1, commandTokens.size)
-        } else emptyList()
-    } else {
-        emptyList()
-    }
-
-private fun Piper.MinimalTool.buildTokenList(): MutableList<String> {
-    val tokens = mutableListOf<String>()
-    tokens += cmd.prefixList
-    if (cmd.inputMethod == Piper.CommandInvocation.InputMethod.FILENAME) {
-        tokens += INPUT_FILENAME_TOKEN
-        tokens += cmd.postfixList
-    }
-    return tokens
-}
-
-
-
 private fun GeneratorEditorState.deepCopy(): GeneratorEditorState {
     val copy = GeneratorEditorState()
     copy.modelIndex = modelIndex

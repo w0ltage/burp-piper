@@ -8,7 +8,6 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.Toolkit
-import java.awt.Window
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -22,7 +21,6 @@ import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JComboBox
 import javax.swing.JLabel
-import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
@@ -327,16 +325,7 @@ class WorkspaceCommandPanel(
     private val tagsLabelText: String = "Command tags (comma separated)",
 ) : JPanel(BorderLayout()) {
 
-    private val window: Window = when (parent) {
-        is Window -> parent
-        is Component -> SwingUtilities.getWindowAncestor(parent) as? Window ?: JOptionPane.getRootFrame()
-        else -> JOptionPane.getRootFrame()
-    }
-    private val commandEditor = CollapsedCommandInvocationWidget(
-        window,
-        Piper.CommandInvocation.getDefaultInstance(),
-        purpose,
-    )
+    private val commandEditor = CommandInvocationEditor(parent, purpose, showDependenciesField = !showDependenciesField)
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
     private val tagsField = if (showTagsField) JTextField() else null
@@ -348,15 +337,16 @@ class WorkspaceCommandPanel(
         val cs = GridBagConstraints().apply {
             gridx = 0
             gridy = 0
-            anchor = GridBagConstraints.WEST
+            anchor = GridBagConstraints.NORTHWEST
             weightx = 1.0
-            fill = GridBagConstraints.HORIZONTAL
+            fill = GridBagConstraints.BOTH
             insets = Insets(4, 0, 4, 0)
         }
-        commandEditor.buildGUI(content, cs)
+        content.add(commandEditor, cs)
 
         ansiCheck?.let {
             cs.gridy++
+            cs.fill = GridBagConstraints.HORIZONTAL
             content.add(it, cs)
             it.addChangeListener { onChange() }
         }
@@ -377,24 +367,24 @@ class WorkspaceCommandPanel(
             field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
         }
 
-        commandEditor.addChangeListener(object : ChangeListener<Piper.CommandInvocation> {
-            override fun valueChanged(value: Piper.CommandInvocation?) {
-                onChange()
-            }
-        })
+        commandEditor.addChangeListener { onChange() }
 
-        add(JScrollPane(content), BorderLayout.CENTER)
+        val scroll = JScrollPane(content)
+        add(scroll, BorderLayout.CENTER)
+        commandEditor.display(Piper.CommandInvocation.getDefaultInstance())
     }
 
     fun display(state: WorkspaceCommandState?) {
-        commandEditor.value = state?.command ?: Piper.CommandInvocation.getDefaultInstance()
+        commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
         ansiCheck?.isSelected = state?.usesAnsi ?: false
         dependenciesField?.text = state?.dependencies?.joinToString(", ") ?: ""
         tagsField?.text = state?.tags?.joinToString(", ") ?: ""
     }
 
     fun snapshot(): WorkspaceCommandState {
-        val command = commandEditor.value ?: Piper.CommandInvocation.getDefaultInstance()
+        val command = runCatching { commandEditor.snapshot() }.getOrElse { error ->
+            throw RuntimeException(error.message ?: "Invalid command configuration", error)
+        }
         val dependencies = dependenciesField?.text
             ?.split(',')
             ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }

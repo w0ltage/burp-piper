@@ -26,6 +26,8 @@ import javax.swing.AbstractButton
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -37,6 +39,7 @@ import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 import javax.swing.JSplitPane
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
@@ -185,9 +188,10 @@ private abstract class MinimalToolInlineEditor<T>(
         }
         formPanel.removeAll()
         val cs = GridBagConstraints().apply {
-            fill = GridBagConstraints.HORIZONTAL
+            fill = GridBagConstraints.BOTH
             anchor = GridBagConstraints.FIRST_LINE_START
             weightx = 1.0
+            weighty = 1.0
             gridx = 0
             gridy = 0
             insets = Insets(2, 0, 2, 0)
@@ -202,6 +206,7 @@ private abstract class MinimalToolInlineEditor<T>(
             config.showScope,
             config.showFilter,
         )
+        widget?.addCommandChangeListener { notifyDirty() }
         addCustomFields(value, formPanel, cs)
         val fillerConstraints = GridBagConstraints().apply {
             gridx = 0
@@ -561,22 +566,27 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
     override fun extractCommon(value: Piper.UserActionTool): Piper.MinimalTool = value.common
 
     override fun addCustomFields(value: Piper.UserActionTool, panel: Container, cs: GridBagConstraints) {
-        hasGUICheckBox = createFullWidthCheckBox("Has its own GUI (no need for a console window)", value.hasGUI, panel, cs)
-        avoidPipeCheckBox = createFullWidthCheckBox("Avoid piping into this tool (reduces clutter in menu if it doesn't make sense)", value.avoidPipe, panel, cs)
-        minInputsSpinner = addSpinner(
-            "Minimum required number of selected items: ",
-            max(value.minInputs, 1),
-            1,
-            panel,
-            cs,
-        )
-        maxInputsSpinner = addSpinner(
-            "Maximum allowed number of selected items: (0 = no limit) ",
-            value.maxInputs,
-            0,
-            panel,
-            cs,
-        )
+        val container = JPanel()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        hasGUICheckBox = JCheckBox("Has its own GUI (no need for a console window)", value.hasGUI).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        avoidPipeCheckBox = JCheckBox("Avoid piping into this tool (reduces clutter in menu if it doesn't make sense)", value.avoidPipe).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        container.add(hasGUICheckBox)
+        container.add(Box.createVerticalStrut(8))
+        container.add(avoidPipeCheckBox)
+        container.add(Box.createVerticalStrut(12))
+
+        minInputsSpinner = JSpinner(SpinnerNumberModel(max(value.minInputs, 1), 1, Integer.MAX_VALUE, 1))
+        maxInputsSpinner = JSpinner(SpinnerNumberModel(value.maxInputs, 0, Integer.MAX_VALUE, 1))
+        container.add(buildSpinnerRow("Minimum required number of selected items:", minInputsSpinner))
+        container.add(Box.createVerticalStrut(8))
+        container.add(buildSpinnerRow("Maximum allowed number of selected items (0 = no limit):", maxInputsSpinner))
+        container.add(Box.createVerticalGlue())
+
+        minimalToolWidget()?.addCustomTab("Behavior", JScrollPane(container))
     }
 
     override fun buildUpdatedValue(original: Piper.UserActionTool, common: Piper.MinimalTool): Piper.UserActionTool {
@@ -595,23 +605,17 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
     }
 }
 
-private fun addSpinner(
-    caption: String,
-    initial: Int,
-    minimum: Int,
-    panel: Container,
-    cs: GridBagConstraints,
-): JSpinner {
-    val model = javax.swing.SpinnerNumberModel(initial, minimum, Integer.MAX_VALUE, 1)
-    cs.gridy++
-    cs.gridwidth = 2
-    cs.gridx = 0
-    panel.add(JLabel(caption), cs)
-    val spinner = JSpinner(model)
-    cs.gridx = 2
-    cs.gridwidth = 2
-    panel.add(spinner, cs)
-    return spinner
+private fun buildSpinnerRow(label: String, spinner: JSpinner): JComponent {
+    val row = JPanel()
+    row.layout = BoxLayout(row, BoxLayout.X_AXIS)
+    val text = JLabel(label)
+    text.alignmentX = Component.LEFT_ALIGNMENT
+    row.add(text)
+    row.add(Box.createHorizontalStrut(8))
+    row.add(spinner)
+    row.add(Box.createHorizontalGlue())
+    row.alignmentX = Component.LEFT_ALIGNMENT
+    return row
 }
 
 private class BasicMinimalToolEditor(
@@ -632,17 +636,40 @@ private class HttpListenerInlineEditor(parent: Component?) : MinimalToolInlineEd
     override fun extractCommon(value: Piper.HttpListener): Piper.MinimalTool = value.common
 
     override fun addCustomFields(value: Piper.HttpListener, panel: Container, cs: GridBagConstraints) {
-        scopeCombo = createLabeledWidget(
-            "Listen to ",
-            JComboBox(ConfigHttpListenerScope.values()).apply {
-                selectedItem = ConfigHttpListenerScope.fromHttpListenerScope(value.scope)
-            },
-            panel,
-            cs,
-        )
-        toolsWidget = EnumSetWidget(value.toolSet, panel, cs, "sent/received by", BurpTool::class.java)
-        ignoreOutputCheckBox = createFullWidthCheckBox("Ignore output (if you only need side effects)", value.ignoreOutput, panel, cs)
-        noteLabel = addFullWidthComponent(JLabel(HTTP_LISTENER_NOTE), panel, cs)
+        val container = JPanel(GridBagLayout())
+        val constraints = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(8, 8, 8, 8)
+        }
+        scopeCombo = JComboBox(ConfigHttpListenerScope.values()).apply {
+            selectedItem = ConfigHttpListenerScope.fromHttpListenerScope(value.scope)
+        }
+        container.add(JLabel("Listen to"), constraints)
+        constraints.gridx = 1
+        constraints.weightx = 1.0
+        constraints.fill = GridBagConstraints.HORIZONTAL
+        container.add(scopeCombo, constraints)
+
+        constraints.gridx = 0
+        constraints.gridy++
+        constraints.weightx = 0.0
+        constraints.fill = GridBagConstraints.NONE
+        toolsWidget = EnumSetWidget(value.toolSet, container, constraints, "sent/received by", BurpTool::class.java)
+
+        constraints.gridx = 0
+        constraints.gridy++
+        constraints.gridwidth = 2
+        constraints.anchor = GridBagConstraints.WEST
+        constraints.fill = GridBagConstraints.NONE
+        ignoreOutputCheckBox = JCheckBox("Ignore output (if you only need side effects)", value.ignoreOutput)
+        container.add(ignoreOutputCheckBox, constraints)
+
+        constraints.gridy++
+        noteLabel = JLabel(HTTP_LISTENER_NOTE)
+        container.add(noteLabel, constraints)
+        minimalToolWidget()?.addCustomTab("HTTP listener", JScrollPane(container))
         minimalToolWidget()?.addFilterChangeListener(object : ChangeListener<Piper.MessageMatch> {
             override fun valueChanged(value: Piper.MessageMatch?) {
                 noteLabel.isVisible = value == null
@@ -670,9 +697,28 @@ private class HighlighterInlineEditor(parent: Component?) : MinimalToolInlineEdi
     override fun extractCommon(value: Piper.Highlighter): Piper.MinimalTool = value.common
 
     override fun addCustomFields(value: Piper.Highlighter, panel: Container, cs: GridBagConstraints) {
-        overwriteCheckBox = createFullWidthCheckBox("Overwrite highlight on items that already have one", value.overwrite, panel, cs)
-        listenerCheckBox = createFullWidthCheckBox("Continuously apply to future requests/responses", value.applyWithListener, panel, cs)
-        colorCombo = createLabeledWidget("Set highlight to ", JComboBox(Highlight.values()), panel, cs)
+        val container = JPanel()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        overwriteCheckBox = JCheckBox("Overwrite highlight on items that already have one", value.overwrite).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        listenerCheckBox = JCheckBox("Continuously apply to future requests/responses", value.applyWithListener).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        container.add(overwriteCheckBox)
+        container.add(Box.createVerticalStrut(8))
+        container.add(listenerCheckBox)
+        container.add(Box.createVerticalStrut(12))
+
+        colorCombo = JComboBox(Highlight.values())
+        val comboRow = JPanel()
+        comboRow.layout = BoxLayout(comboRow, BoxLayout.X_AXIS)
+        comboRow.add(JLabel("Set highlight to"))
+        comboRow.add(Box.createHorizontalStrut(8))
+        comboRow.add(colorCombo)
+        comboRow.add(Box.createHorizontalGlue())
+        comboRow.alignmentX = Component.LEFT_ALIGNMENT
+        container.add(comboRow)
         colorCombo.renderer = object : DefaultListCellRenderer() {
             override fun getListCellRendererComponent(
                 list: JList<*>?,
@@ -691,6 +737,8 @@ private class HighlighterInlineEditor(parent: Component?) : MinimalToolInlineEdi
             }
         }
         Highlight.fromString(value.color)?.let { colorCombo.selectedItem = it }
+        container.add(Box.createVerticalGlue())
+        minimalToolWidget()?.addCustomTab("Highlight", JScrollPane(container))
     }
 
     override fun buildUpdatedValue(original: Piper.Highlighter, common: Piper.MinimalTool): Piper.Highlighter =
