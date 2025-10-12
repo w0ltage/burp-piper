@@ -1,20 +1,14 @@
 package burp
 
 import java.awt.BorderLayout
-import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Dimension
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Insets
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
-import java.awt.Window
 import java.awt.event.ActionEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.AbstractAction
-import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.DefaultComboBoxModel
@@ -32,9 +26,7 @@ import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
-import javax.swing.JTextArea
 import javax.swing.JTextField
-import javax.swing.JToggleButton
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
 import javax.swing.border.EmptyBorder
@@ -132,6 +124,13 @@ private fun ViewerEditorState.toCommentator(): Piper.Commentator {
     }.build()
 }
 
+private fun ViewerEditorState.toCommandState(): WorkspaceCommandState = WorkspaceCommandState(
+    command = command,
+    usesAnsi = usesColors,
+    dependencies = dependencies,
+    tags = tags,
+)
+
 private class ViewerListModel<T>(
     private val backing: DefaultListModel<T>,
     private val extractor: (T) -> Piper.MinimalTool,
@@ -211,146 +210,92 @@ private class ViewerListRenderer<T>(
     }
 }
 
-private class OverviewPane : JPanel(BorderLayout()) {
-    private val summary = JTextArea()
-
-    init {
-        border = EmptyBorder(12, 12, 12, 12)
-        summary.isEditable = false
-        summary.isOpaque = false
-        summary.lineWrap = true
-        summary.wrapStyleWord = true
-        summary.border = null
-        val title = JLabel("Workspace overview")
-        title.font = title.font.deriveFont(title.font.style or java.awt.Font.BOLD)
-        val container = JPanel()
-        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
-        container.isOpaque = false
-        container.add(title)
-        container.add(Box.createVerticalStrut(8))
-        container.add(summary)
-        val wrapper = JPanel(BorderLayout())
-        wrapper.isOpaque = false
-        wrapper.add(container, BorderLayout.NORTH)
-        add(wrapper, BorderLayout.CENTER)
+private fun renderViewerOverview(state: ViewerEditorState): String = buildString {
+    appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
+    appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
+    appendLine("Scope: ${state.scope.name.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)}")
+    appendLine("Command: ${state.command.commandLine}")
+    if (state.tags.isNotEmpty()) {
+        appendLine("Tags: ${state.tags.joinToString(", ")}")
     }
-
-    fun update(state: ViewerEditorState?) {
-        summary.text = if (state == null) {
-            "Select or create a configuration to begin."
-        } else {
-            buildString {
-                appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
-                appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
-                appendLine("Scope: ${state.scope.name.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)}")
-                appendLine("Command: ${state.command.commandLine}")
-                if (state.tags.isNotEmpty()) {
-                    appendLine("Tags: ${state.tags.joinToString(", ")}")
-                }
-                if (state.dependencies.isNotEmpty()) {
-                    appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
-                }
-                if (state.filter != null) {
-                    appendLine("Filter: ${state.filter?.toHumanReadable(negation = false, hideParentheses = true)}")
-                } else {
-                    appendLine("Filter: (none)")
-                }
-            }
-        }
+    if (state.dependencies.isNotEmpty()) {
+        appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
+    }
+    if (state.filter != null) {
+        appendLine("Filter: ${state.filter?.toHumanReadable(negation = false, hideParentheses = true)}")
+    } else {
+        appendLine("Filter: (none)")
     }
 }
 
-private class NameHeaderPanel(
-    private val onChange: () -> Unit,
-) : JPanel() {
-    val nameField = JTextField()
-    private val enabledToggle = JToggleButton("Enabled")
-    val tagsField = JTextField()
-    private val templateCombo = JComboBox<ViewerTemplateOption>()
-    val scopeCombo = JComboBox(ScopeOption.values())
-
-    init {
-        layout = GridBagLayout()
-        border = EmptyBorder(12, 12, 12, 12)
-        val constraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = 0
-            anchor = GridBagConstraints.WEST
-            insets = Insets(4, 4, 4, 4)
-        }
-        add(JLabel("Name"), constraints)
-        constraints.gridx = 1
-        constraints.weightx = 1.0
-        constraints.fill = GridBagConstraints.HORIZONTAL
-        add(nameField, constraints)
-
-        constraints.gridx = 2
-        constraints.weightx = 0.0
-        add(enabledToggle, constraints)
-
-        constraints.gridx = 0
-        constraints.gridy = 1
-        add(JLabel("Tags"), constraints)
-        constraints.gridx = 1
-        constraints.gridwidth = 2
-        add(tagsField, constraints)
-
-        constraints.gridy = 2
-        constraints.gridx = 0
-        constraints.gridwidth = 1
-        add(JLabel("Template"), constraints)
-        constraints.gridx = 1
-        add(templateCombo, constraints)
-
-        constraints.gridx = 2
-        add(scopeCombo, constraints)
-
-        nameField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        enabledToggle.addActionListener { onChange() }
-        scopeCombo.addActionListener { onChange() }
-        templateCombo.addActionListener { onChange() }
+private fun createViewerOverviewPanel(): WorkspaceOverviewPanel<ViewerEditorState> =
+    WorkspaceOverviewPanel(
+        title = "Workspace overview",
+        emptyText = "Select or create a configuration to begin.",
+    ) { state ->
+        renderViewerOverview(state)
     }
 
-    fun setTemplates(selected: String?) {
-        val options = mutableListOf(
+private class ViewerHeaderPanel(
+    onChange: () -> Unit,
+) : WorkspaceHeaderPanel<ViewerTemplateOption>("Template", onChange) {
+
+    private val scopeCombo = JComboBox(ScopeOption.values())
+    private var templates: List<ViewerTemplateOption> = emptyList()
+
+    init {
+        addTemplateField("Scope", scopeCombo)
+        scopeCombo.addActionListener { onChange() }
+        updateTemplates(null)
+        scopeCombo.selectedItem = ScopeOption.from(null)
+    }
+
+    fun apply(state: ViewerEditorState?) {
+        val selectedId = state?.templateId
+        updateTemplates(selectedId)
+        setValues(
+            WorkspaceHeaderValues(
+                name = state?.name.orEmpty(),
+                enabled = state?.enabled ?: false,
+                tags = state?.tags ?: emptyList(),
+                template = templateCombo.selectedItem as? ViewerTemplateOption,
+            ),
+        )
+        scopeCombo.selectedItem = ScopeOption.from(state?.scope)
+    }
+
+    fun snapshot(): HeaderSnapshot {
+        val values = readValues()
+        val selectedTemplate = values.template ?: templates.firstOrNull()
+        return HeaderSnapshot(
+            name = values.name,
+            enabled = values.enabled,
+            tags = values.tags,
+            templateId = selectedTemplate?.id,
+            scope = (scopeCombo.selectedItem as ScopeOption).scope,
+        )
+    }
+
+    fun setScopeEnabled(enabled: Boolean) {
+        scopeCombo.isEnabled = enabled
+    }
+
+    private fun updateTemplates(selectedId: String?) {
+        templates = listOf(
             ViewerTemplateOption(null, "Custom", ""),
             ViewerTemplateOption("json", "JSON formatter", "jq based pretty-printer"),
             ViewerTemplateOption("asn1", "ASN.1 decoder", "openssl asn1parse"),
             ViewerTemplateOption("gzip", "GZIP inflator", "gzip --decompress"),
         )
-        templateCombo.model = DefaultComboBoxModel(options.toTypedArray())
-        val index = options.indexOfFirst { it.id == selected }
-        templateCombo.selectedIndex = if (index >= 0) index else 0
-    }
-
-    fun snapshot(): HeaderSnapshot = HeaderSnapshot(
-        name = nameField.text,
-        enabled = enabledToggle.isSelected,
-        tags = tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) },
-        templateId = (templateCombo.selectedItem as? ViewerTemplateOption)?.id,
-        scope = (scopeCombo.selectedItem as ScopeOption).scope,
-    )
-
-    fun apply(state: ViewerEditorState?) {
-        if (state == null) {
-            nameField.text = ""
-            tagsField.text = ""
-            enabledToggle.isSelected = false
-            scopeCombo.selectedItem = ScopeOption.from(state?.scope)
-            setTemplates(null)
-            return
+        withTemplateChangeSuppressed {
+            templateCombo.model = DefaultComboBoxModel(templates.toTypedArray())
+            val selected = templates.firstOrNull { it.id == selectedId } ?: templates.firstOrNull()
+            when {
+                selected != null -> templateCombo.selectedItem = selected
+                templateCombo.itemCount > 0 -> templateCombo.selectedIndex = 0
+                else -> templateCombo.selectedIndex = -1
+            }
         }
-        nameField.text = state.name
-        tagsField.text = state.tags.joinToString(", ")
-        enabledToggle.isSelected = state.enabled
-        scopeCombo.selectedItem = ScopeOption.from(state.scope)
-        setTemplates(state.templateId)
-    }
-
-    fun setEnabledState(enabled: Boolean) {
-        nameField.isEnabled = enabled
-        tagsField.isEnabled = enabled
     }
 }
 
@@ -376,208 +321,6 @@ private enum class ScopeOption(val scope: Piper.MinimalTool.Scope, val label: St
             Piper.MinimalTool.Scope.RESPONSE_ONLY -> RESPONSE
             else -> BOTH
         }
-    }
-}
-
-private class FilterTab(
-    parent: Component?,
-    onChange: () -> Unit,
-) : JPanel(BorderLayout()) {
-
-    private val filterPanel = MessageMatchInlinePanel(parent)
-    private val summaryLabel = JLabel("Filter description → (none)")
-    private val sampleLabel = JLabel("Matched sample: –")
-
-    init {
-        border = EmptyBorder(12, 12, 12, 12)
-        add(filterPanel, BorderLayout.CENTER)
-        val footer = JPanel()
-        footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
-        footer.border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
-        summaryLabel.alignmentX = Component.LEFT_ALIGNMENT
-        sampleLabel.alignmentX = Component.LEFT_ALIGNMENT
-        footer.add(summaryLabel)
-        footer.add(Box.createVerticalStrut(4))
-        footer.add(sampleLabel)
-        add(footer, BorderLayout.SOUTH)
-        filterPanel.addChangeListener {
-            updateSummary()
-            onChange()
-        }
-    }
-
-    fun setFilter(filter: Piper.MessageMatch?) {
-        filterPanel.setValue(filter)
-        updateSummary()
-    }
-
-    fun value(): Piper.MessageMatch? = filterPanel.toMessageMatch()
-
-    private fun updateSummary() {
-        val value = filterPanel.toMessageMatch()
-        summaryLabel.text = "Filter description → " +
-            (value?.toHumanReadable(negation = false, hideParentheses = true) ?: "(none)")
-        sampleLabel.text = "Matched sample: preview unavailable"
-    }
-}
-
-private class MessageMatchInlinePanel(parent: Component?) : JPanel(BorderLayout()) {
-    private var value: Piper.MessageMatch? = null
-    private val editButton = JButton("Edit filter")
-    private val removeButton = JButton("Remove filter")
-    private val cardPanel = JPanel(CardLayout())
-    private val summary = JTextArea()
-    private val listeners = mutableListOf<() -> Unit>()
-
-    init {
-        border = EmptyBorder(8, 8, 8, 8)
-        summary.isEditable = false
-        summary.isOpaque = false
-        summary.lineWrap = true
-        summary.wrapStyleWord = true
-        val summaryPanel = JPanel(BorderLayout())
-        summaryPanel.add(summary, BorderLayout.CENTER)
-        val buttonRow = JPanel()
-        buttonRow.layout = BoxLayout(buttonRow, BoxLayout.X_AXIS)
-        buttonRow.add(editButton)
-        buttonRow.add(Box.createRigidArea(Dimension(4, 0)))
-        buttonRow.add(removeButton)
-        buttonRow.add(Box.createHorizontalGlue())
-        val container = JPanel()
-        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
-        container.add(summaryPanel)
-        container.add(Box.createVerticalStrut(8))
-        container.add(buttonRow)
-        cardPanel.add(container, "summary")
-        add(cardPanel, BorderLayout.NORTH)
-
-        editButton.addActionListener {
-            val host = parent ?: this
-            val edited = MessageMatchDialog(value ?: Piper.MessageMatch.getDefaultInstance(), true, host).showGUI()
-            if (edited != null) {
-                value = edited
-                updateSummary()
-                listeners.forEach { it.invoke() }
-            }
-        }
-        removeButton.addActionListener {
-            value = null
-            updateSummary()
-            listeners.forEach { it.invoke() }
-        }
-        updateSummary()
-    }
-
-    fun addChangeListener(listener: () -> Unit) {
-        listeners += listener
-    }
-
-    fun setValue(newValue: Piper.MessageMatch?) {
-        value = newValue
-        updateSummary()
-    }
-
-    fun toMessageMatch(): Piper.MessageMatch? = value
-
-    private fun updateSummary() {
-        summary.text = value?.toHumanReadable(negation = false, hideParentheses = true)
-            ?: "No filter defined. Click Edit filter to add rules."
-        removeButton.isEnabled = value != null
-    }
-}
-
-private class CommandTab(parent: Component?, onChange: () -> Unit) : JPanel(BorderLayout()) {
-    private val window: Window = when (parent) {
-        is Window -> parent
-        is Component -> SwingUtilities.getWindowAncestor(parent) as? Window ?: JOptionPane.getRootFrame()
-        else -> JOptionPane.getRootFrame()
-    }
-    private val commandEditor = CollapsedCommandInvocationWidget(window, Piper.CommandInvocation.getDefaultInstance(), CommandInvocationPurpose.SELF_FILTER)
-    private val ansiCheck = JCheckBox("Uses ANSI (color) escape sequences")
-    private val dependenciesField = JTextField()
-    private val tagsField = JTextField()
-
-    init {
-        border = EmptyBorder(12, 12, 12, 12)
-        val content = JPanel()
-        content.layout = GridBagLayout()
-        val cs = GridBagConstraints().apply {
-            gridx = 0
-            gridy = 0
-            anchor = GridBagConstraints.WEST
-            weightx = 1.0
-            fill = GridBagConstraints.HORIZONTAL
-            insets = Insets(4, 0, 4, 0)
-        }
-        commandEditor.buildGUI(content, cs)
-
-        cs.gridy++
-        content.add(ansiCheck, cs)
-        cs.gridy++
-        val dependenciesLabel = JLabel("Binaries required in PATH (comma separated)")
-        content.add(dependenciesLabel, cs)
-        cs.gridy++
-        content.add(dependenciesField, cs)
-        cs.gridy++
-        val tagsLabel = JLabel("Command tags (comma separated)")
-        content.add(tagsLabel, cs)
-        cs.gridy++
-        content.add(tagsField, cs)
-
-        commandEditor.addChangeListener(object : ChangeListener<Piper.CommandInvocation> {
-            override fun valueChanged(value: Piper.CommandInvocation?) {
-                onChange()
-            }
-        })
-        ansiCheck.addChangeListener { onChange() }
-        dependenciesField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-
-        add(JScrollPane(content), BorderLayout.CENTER)
-    }
-
-    fun setCommand(state: ViewerEditorState?) {
-        commandEditor.value = state?.command ?: Piper.CommandInvocation.getDefaultInstance()
-        ansiCheck.isSelected = state?.usesColors ?: false
-        dependenciesField.text = state?.dependencies?.joinToString(", ") ?: ""
-        tagsField.text = state?.tags?.joinToString(", ") ?: ""
-    }
-
-    fun snapshot(): CommandSnapshot {
-        val command = commandEditor.value ?: Piper.CommandInvocation.getDefaultInstance()
-        val dependencies = dependenciesField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-        val tags = tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-        return CommandSnapshot(command, ansiCheck.isSelected, dependencies, tags)
-    }
-}
-
-private data class CommandSnapshot(
-    val command: Piper.CommandInvocation,
-    val usesAnsi: Boolean,
-    val dependencies: List<String>,
-    val tags: List<String>,
-)
-
-private class ValidationHistoryTab(parent: Component?, supplier: () -> Piper.MinimalTool?) : JPanel(BorderLayout()) {
-    private val historyPanel = WorkspaceHistoryPanel()
-    private val validationPanel = WorkspaceValidationPanel(parent, supplier) { entry ->
-        historyPanel.addEntry(entry)
-    }
-
-    init {
-        val tabs = JTabbedPane()
-        tabs.addTab("Run test", validationPanel)
-        tabs.addTab("History", historyPanel)
-        add(tabs, BorderLayout.CENTER)
-    }
-
-    fun reset() {
-        validationPanel.reset()
-        historyPanel.clear()
-    }
-
-    fun updateParameters(parameters: List<Piper.CommandInvocation.Parameter>) {
-        validationPanel.updateParameterInputs(parameters)
     }
 }
 
@@ -617,16 +360,16 @@ class MessageViewerWorkspacePanel(
     private val filterModel = ViewerListModel(model) { it.common }
     private val list = JList<Piper.MessageViewer>(filterModel)
     private val searchField = JTextField()
-    private val header = NameHeaderPanel { markDirty() }
-    private val overview = OverviewPane()
-    private val filterTab = FilterTab(parent) { markDirty() }
-    private val commandTab = CommandTab(parent) { markDirty() }
-    private val validationTab = ValidationHistoryTab(parent) { collectMinimalToolForTest() }
-    private val tabs = JTabbedPane()
-    private val footer = JPanel()
     private val saveButton = JButton("Save")
     private val cancelButton = JButton("Cancel")
     private val convertButton = JButton("Convert to commentator")
+    private val header = ViewerHeaderPanel { markDirty() }
+    private val overview = createViewerOverviewPanel()
+    private val filterTab = WorkspaceFilterPanel(parent) { markDirty() }
+    private val commandTab = WorkspaceCommandPanel(parent, onChange = { markDirty() })
+    private val validationTab = WorkspaceValidationHistoryPanel(parent) { collectMinimalToolForTest() }
+    private val tabs = JTabbedPane()
+    private val footer = JPanel()
     private var currentState: ViewerEditorState? = null
     private var loading = false
 
@@ -723,10 +466,9 @@ class MessageViewerWorkspacePanel(
         try {
             currentState = state?.copy()
             header.apply(state)
-            header.setTemplates(state?.templateId)
-            overview.update(state)
-            filterTab.setFilter(state?.filter)
-            commandTab.setCommand(state)
+            overview.display(state)
+            filterTab.display(state?.filter)
+            commandTab.display(state?.toCommandState())
             validationTab.reset()
             val parameters = state?.command?.parameterList ?: emptyList()
             validationTab.updateParameters(parameters)
@@ -757,7 +499,7 @@ class MessageViewerWorkspacePanel(
         current.filter = filter
         current.usesColors = commandSnapshot.usesAnsi
         current.templateId = snapshot.templateId
-        overview.update(current)
+        overview.display(current)
         return current
     }
 
@@ -888,16 +630,16 @@ class CommentatorWorkspacePanel(
     private val filterModel = ViewerListModel(model) { it.common }
     private val list = JList<Piper.Commentator>(filterModel)
     private val searchField = JTextField()
-    private val header = NameHeaderPanel { markDirty() }
-    private val overview = OverviewPane()
-    private val filterTab = FilterTab(parent) { markDirty() }
-    private val commandTab = CommandTab(parent) { markDirty() }
-    private val validationTab = ValidationHistoryTab(parent) { collectMinimalToolForTest() }
+    private val saveButton = JButton("Save")
+    private val cancelButton = JButton("Cancel")
+    private val header = ViewerHeaderPanel { markDirty() }
+    private val overview = createViewerOverviewPanel()
+    private val filterTab = WorkspaceFilterPanel(parent) { markDirty() }
+    private val commandTab = WorkspaceCommandPanel(parent, onChange = { markDirty() })
+    private val validationTab = WorkspaceValidationHistoryPanel(parent) { collectMinimalToolForTest() }
     private val commentOptions = CommentatorOptionsPanel { markDirty() }
     private val tabs = JTabbedPane()
     private val footer = JPanel()
-    private val saveButton = JButton("Save")
-    private val cancelButton = JButton("Cancel")
     private var currentState: ViewerEditorState? = null
     private var loading = false
 
@@ -943,7 +685,7 @@ class CommentatorWorkspacePanel(
         tabs.addTab("Validation & Test", validationTab)
         tabs.addTab("History", WorkspaceHistoryPanel())
 
-        header.scopeCombo.isEnabled = false
+        header.setScopeEnabled(false)
 
         footer.layout = BoxLayout(footer, BoxLayout.X_AXIS)
         saveButton.addActionListener { save() }
@@ -999,9 +741,9 @@ class CommentatorWorkspacePanel(
         try {
             currentState = state?.copy()
             header.apply(state)
-            overview.update(state)
-            filterTab.setFilter(state?.filter)
-            commandTab.setCommand(state)
+            overview.display(state)
+            filterTab.display(state?.filter)
+            commandTab.display(state?.toCommandState())
             commentOptions.apply(state)
             validationTab.reset()
             val parameters = state?.command?.parameterList ?: emptyList()
@@ -1029,11 +771,12 @@ class CommentatorWorkspacePanel(
         state.tags = commandSnapshot.tags.toMutableList()
         state.dependencies = commandSnapshot.dependencies.toMutableList()
         state.command = commandSnapshot.command
+        state.usesColors = commandSnapshot.usesAnsi
         state.filter = filter
         val (overwrite, applyListener) = commentOptions.snapshot()
         state.overwrite = overwrite
         state.applyWithListener = applyListener
-        overview.update(state)
+        overview.display(state)
         return state
     }
 
