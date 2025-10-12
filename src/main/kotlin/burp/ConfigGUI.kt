@@ -440,107 +440,145 @@ class CollapsedCommandInvocationWidget(
     private val purpose: CommandInvocationPurpose,
     private val showPassHeaders: Boolean = true,
     private val placeholderValues: List<String> = DEFAULT_COMMAND_TOKEN_PLACEHOLDERS,
+    private val inlineMode: Boolean = true,
 ) {
 
+    private val isInline = inlineMode
     private val changeListeners = mutableListOf<ChangeListener<Piper.CommandInvocation>>()
-    private val enableCheck = if (purpose == CommandInvocationPurpose.MATCH_FILTER) JCheckBox("Enable command") else null
-    private val btnCopy = JButton("Copy")
-    private val btnPaste = JButton("Paste")
-    private val btnClear = if (purpose == CommandInvocationPurpose.MATCH_FILTER) JButton("Clear") else null
-    private val editorPanel = CommandInvocationEditorPanel(
-        window,
-        window,
-        cmd,
-        purpose,
-        showPassHeaders,
-        placeholderValues,
-    )
-    private val editorContainer = JPanel(BorderLayout()).apply {
+    private val defaultCommand = Piper.CommandInvocation.getDefaultInstance()
+    private val enableCheck = if (isInline && purpose == CommandInvocationPurpose.MATCH_FILTER) JCheckBox("Enable command") else null
+    private val btnCopy = if (isInline) JButton("Copy") else null
+    private val btnPaste = if (isInline) JButton("Paste") else null
+    private val btnClear = if (isInline && purpose == CommandInvocationPurpose.MATCH_FILTER) JButton("Clear") else null
+    private val editorPanel = if (isInline) {
+        CommandInvocationEditorPanel(
+            window,
+            window,
+            cmd,
+            purpose,
+            showPassHeaders,
+            placeholderValues,
+        )
+    } else null
+    private val editorContainer = if (isInline) JPanel(BorderLayout()).apply {
         border = BorderFactory.createEmptyBorder(4, 8, 8, 8)
         add(editorPanel, BorderLayout.CENTER)
-    }
-    private val defaultCommand = Piper.CommandInvocation.getDefaultInstance()
+    } else null
+    private val collapsedDelegate = if (!isInline) object : CollapsedWidget<Piper.CommandInvocation>(
+        window,
+        cmd,
+        "Command: ",
+        removable = (purpose == CommandInvocationPurpose.MATCH_FILTER),
+    ) {
+        override fun editDialog(value: Piper.CommandInvocation, parent: Component): Piper.CommandInvocation? =
+            CommandInvocationDialog(value, purpose = purpose, parent = parent, showPassHeaders = showPassHeaders).showGUI()
+
+        override fun toHumanReadable(): String =
+            (if (purpose == CommandInvocationPurpose.MATCH_FILTER) value?.toHumanReadable(negation = false) else value?.commandLine)
+                ?: "(no command)"
+
+        override val asMap: Map<String, Any>?
+            get() = value?.toMap()
+
+        override fun parseMap(map: Map<String, Any>): Piper.CommandInvocation = commandInvocationFromMap(map)
+
+        override val default: Piper.CommandInvocation
+            get() = defaultCommand
+    } else null
     private var suppressEditorUpdates = false
     private var internalValue: Piper.CommandInvocation?
     private var lastDefinedValue: Piper.CommandInvocation
 
     init {
-        lastDefinedValue = if (cmd == defaultCommand) defaultCommand else cmd
-        internalValue = if (purpose == CommandInvocationPurpose.MATCH_FILTER && cmd == defaultCommand) null else lastDefinedValue
-        editorPanel.setValue(lastDefinedValue)
+        if (isInline) {
+            lastDefinedValue = if (cmd == defaultCommand) defaultCommand else cmd
+            internalValue = if (purpose == CommandInvocationPurpose.MATCH_FILTER && cmd == defaultCommand) null else lastDefinedValue
+            editorPanel!!.setValue(lastDefinedValue)
 
-        editorPanel.addChangeListener {
-            if (internalValue == null || suppressEditorUpdates) return@addChangeListener
-            val updated = readCurrentCommand(showErrors = false) ?: return@addChangeListener
-            internalValue = updated
-            lastDefinedValue = updated
-            notifyListeners()
-        }
-
-        enableCheck?.addActionListener {
-            if (enableCheck.isSelected) {
-                value = lastDefinedValue
-            } else {
-                readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
-                internalValue = null
-                updateState()
+            editorPanel.addChangeListener {
+                if (internalValue == null || suppressEditorUpdates) return@addChangeListener
+                val updated = readCurrentCommand(showErrors = false) ?: return@addChangeListener
+                internalValue = updated
+                lastDefinedValue = updated
                 notifyListeners()
             }
-        }
 
-        btnCopy.addActionListener {
-            val current = internalValue ?: return@addActionListener
-            Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(Dump(DumpSettingsBuilder().build()).dumpToString(current.toMap())), null)
-        }
-
-        btnPaste.addActionListener {
-            val clip = Toolkit.getDefaultToolkit().systemClipboard
-            val text = clip.getData(DataFlavor.stringFlavor) as? String ?: return@addActionListener
-            val loader = Load(LoadSettingsBuilder().build())
-            try {
-                val parsed = commandInvocationFromMap(loader.loadFromString(text) as Map<String, Any>)
-                value = parsed
-            } catch (e: Exception) {
-                JOptionPane.showMessageDialog(window, e.message)
+            enableCheck?.addActionListener {
+                if (enableCheck.isSelected) {
+                    value = lastDefinedValue
+                } else {
+                    readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
+                    internalValue = null
+                    updateState()
+                    notifyListeners()
+                }
             }
-        }
 
-        btnClear?.addActionListener {
-            readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
-            value = null
-        }
+            btnCopy?.addActionListener {
+                val current = internalValue ?: return@addActionListener
+                Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                    StringSelection(Dump(DumpSettingsBuilder().build()).dumpToString(current.toMap())),
+                    null,
+                )
+            }
 
-        updateState()
+            btnPaste?.addActionListener {
+                val clip = Toolkit.getDefaultToolkit().systemClipboard
+                val text = clip.getData(DataFlavor.stringFlavor) as? String ?: return@addActionListener
+                val loader = Load(LoadSettingsBuilder().build())
+                try {
+                    val parsed = commandInvocationFromMap(loader.loadFromString(text) as Map<String, Any>)
+                    value = parsed
+                } catch (e: Exception) {
+                    JOptionPane.showMessageDialog(window, e.message)
+                }
+            }
+
+            btnClear?.addActionListener {
+                readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
+                value = null
+            }
+
+            updateState()
+        } else {
+            internalValue = cmd
+            lastDefinedValue = cmd
+        }
     }
 
     var value: Piper.CommandInvocation?
-        get() = internalValue
+        get() = if (isInline) internalValue else collapsedDelegate?.value
         set(newValue) {
-            internalValue = newValue
-            if (newValue != null) {
-                lastDefinedValue = newValue
-                suppressEditorUpdates = true
-                editorPanel.setValue(newValue)
-                suppressEditorUpdates = false
+            if (isInline) {
+                internalValue = newValue
+                if (newValue != null) {
+                    lastDefinedValue = newValue
+                    suppressEditorUpdates = true
+                    editorPanel!!.setValue(newValue)
+                    suppressEditorUpdates = false
+                }
+                updateState()
+                notifyListeners()
+            } else {
+                collapsedDelegate?.value = newValue
             }
-            updateState()
-            notifyListeners()
         }
 
     private fun readCurrentCommand(showErrors: Boolean): Piper.CommandInvocation? = try {
-        editorPanel.buildCommand()
+        editorPanel!!.buildCommand()
     } catch (e: RuntimeException) {
         if (showErrors) JOptionPane.showMessageDialog(window, e.message)
         null
     }
 
     private fun updateState() {
+        if (!isInline) return
         val enabled = internalValue != null || purpose != CommandInvocationPurpose.MATCH_FILTER
         enableCheck?.isSelected = internalValue != null
-        btnCopy.isEnabled = internalValue != null
+        btnCopy?.isEnabled = internalValue != null
         btnClear?.isEnabled = internalValue != null
-        editorContainer.isVisible = enabled
-        setPanelEnabled(editorPanel, internalValue != null || purpose != CommandInvocationPurpose.MATCH_FILTER)
+        editorContainer!!.isVisible = enabled
+        setPanelEnabled(editorPanel!!, internalValue != null || purpose != CommandInvocationPurpose.MATCH_FILTER)
     }
 
     private fun setPanelEnabled(component: Component, enabled: Boolean) {
@@ -555,29 +593,42 @@ class CollapsedCommandInvocationWidget(
     }
 
     fun requireValue(): Piper.CommandInvocation {
-        val command = readCurrentCommand(showErrors = true)
-        if (command != null) {
-            internalValue = command
-            return command
+        return if (isInline) {
+            val command = readCurrentCommand(showErrors = true)
+            if (command != null) {
+                internalValue = command
+                command
+            } else {
+                throw CancelClosingWindow()
+            }
+        } else {
+            collapsedDelegate?.value ?: throw CancelClosingWindow()
         }
-        throw CancelClosingWindow()
     }
 
     fun addChangeListener(listener: ChangeListener<Piper.CommandInvocation>) {
-        changeListeners += listener
-        listener.valueChanged(internalValue)
+        if (isInline) {
+            changeListeners += listener
+            listener.valueChanged(internalValue)
+        } else {
+            collapsedDelegate?.addChangeListener(listener)
+        }
     }
 
     fun buildGUI(panel: Container, cs: GridBagConstraints) {
-        addFullWidthComponent(JLabel("Command:"), panel, cs)
-        val controls = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
-            enableCheck?.let { add(it) }
-            add(btnCopy)
-            add(btnPaste)
-            btnClear?.let { add(it) }
+        if (isInline) {
+            addFullWidthComponent(JLabel("Command:"), panel, cs)
+            val controls = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+                enableCheck?.let { add(it) }
+                btnCopy?.let { add(it) }
+                btnPaste?.let { add(it) }
+                btnClear?.let { add(it) }
+            }
+            addFullWidthComponent(controls, panel, cs)
+            addFullWidthComponent(editorContainer!!, panel, cs)
+        } else {
+            collapsedDelegate!!.buildGUI(panel, cs)
         }
-        addFullWidthComponent(controls, panel, cs)
-        addFullWidthComponent(editorContainer, panel, cs)
     }
 }
 
@@ -1390,7 +1441,12 @@ private class MessageMatchEditorPanel(
     private val postfixField = HexASCIITextField("postfix", initial.postfix, window)
     private val regExpWidget: RegExpWidget
     private val chmw = if (showHeaderMatch) CollapsedHeaderMatchWidget(window, initial.header) else null
-    private val cciw = CollapsedCommandInvocationWidget(window, initial.cmd, CommandInvocationPurpose.MATCH_FILTER)
+    private val cciw = CollapsedCommandInvocationWidget(
+        window,
+        initial.cmd,
+        CommandInvocationPurpose.MATCH_FILTER,
+        inlineMode = false,
+    )
     private val cbInScope: JCheckBox?
     private val andAlsoPanel = MessageMatchListEditor(
         "All of these apply: [AND]",
