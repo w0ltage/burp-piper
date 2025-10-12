@@ -203,68 +203,40 @@ class WorkspaceOverviewPanel<T>(
 }
 
 class MessageMatchInlinePanel(parent: Component?) : JPanel(BorderLayout()) {
-    private var value: Piper.MessageMatch? = null
-    private val editButton = JButton("Edit filter")
-    private val removeButton = JButton("Remove filter")
-    private val cardPanel = JPanel(CardLayout())
-    private val summary = JTextArea()
-    private val listeners = mutableListOf<() -> Unit>()
+    private val window: Window = when (parent) {
+        is Window -> parent
+        is Component -> SwingUtilities.getWindowAncestor(parent) as? Window ?: JOptionPane.getRootFrame()
+        else -> JOptionPane.getRootFrame()
+    }
+    private val widget = CollapsedMessageMatchWidget(window, mm = null, showHeaderMatch = true, caption = "Filter:")
 
     init {
         border = EmptyBorder(8, 8, 8, 8)
-        summary.isEditable = false
-        summary.isOpaque = false
-        summary.lineWrap = true
-        summary.wrapStyleWord = true
-        val summaryPanel = JPanel(BorderLayout())
-        summaryPanel.add(summary, BorderLayout.CENTER)
-        val buttonRow = JPanel()
-        buttonRow.layout = BoxLayout(buttonRow, BoxLayout.X_AXIS)
-        buttonRow.add(editButton)
-        buttonRow.add(Box.createRigidArea(Dimension(4, 0)))
-        buttonRow.add(removeButton)
-        buttonRow.add(Box.createHorizontalGlue())
-        val container = JPanel()
-        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
-        container.add(summaryPanel)
-        container.add(Box.createVerticalStrut(8))
-        container.add(buttonRow)
-        cardPanel.add(container, "summary")
-        add(cardPanel, BorderLayout.NORTH)
-
-        editButton.addActionListener {
-            val host = parent ?: this
-            val edited = MessageMatchDialog(value ?: Piper.MessageMatch.getDefaultInstance(), true, host).showGUI()
-            if (edited != null) {
-                value = edited
-                updateSummary()
-                listeners.forEach { it.invoke() }
-            }
+        val content = JPanel(GridBagLayout())
+        val cs = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            weightx = 1.0
+            fill = GridBagConstraints.HORIZONTAL
+            anchor = GridBagConstraints.WEST
         }
-        removeButton.addActionListener {
-            value = null
-            updateSummary()
-            listeners.forEach { it.invoke() }
-        }
-        updateSummary()
+        widget.buildGUI(content, cs)
+        add(content, BorderLayout.NORTH)
     }
 
     fun addChangeListener(listener: () -> Unit) {
-        listeners += listener
+        widget.addChangeListener(object : ChangeListener<Piper.MessageMatch> {
+            override fun valueChanged(value: Piper.MessageMatch?) {
+                listener()
+            }
+        })
     }
 
     fun setValue(newValue: Piper.MessageMatch?) {
-        value = newValue
-        updateSummary()
+        widget.value = newValue
     }
 
-    fun toMessageMatch(): Piper.MessageMatch? = value
-
-    private fun updateSummary() {
-        summary.text = value?.toHumanReadable(negation = false, hideParentheses = true)
-            ?: "No filter defined. Click Edit filter to add rules."
-        removeButton.isEnabled = value != null
-    }
+    fun toMessageMatch(): Piper.MessageMatch? = widget.value
 }
 
 class WorkspaceFilterPanel(
@@ -325,6 +297,7 @@ class WorkspaceCommandPanel(
     private val showTagsField: Boolean = true,
     private val dependenciesLabelText: String = "Binaries required in PATH (comma separated)",
     private val tagsLabelText: String = "Command tags (comma separated)",
+    private val placeholderValues: List<String> = DEFAULT_COMMAND_TOKEN_PLACEHOLDERS,
 ) : JPanel(BorderLayout()) {
 
     private val window: Window = when (parent) {
@@ -336,10 +309,12 @@ class WorkspaceCommandPanel(
         window,
         Piper.CommandInvocation.getDefaultInstance(),
         purpose,
+        placeholderValues = placeholderValues,
     )
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
     private val tagsField = if (showTagsField) JTextField() else null
+    private val commandChangeListeners = mutableListOf<(Piper.CommandInvocation?) -> Unit>()
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -380,10 +355,15 @@ class WorkspaceCommandPanel(
         commandEditor.addChangeListener(object : ChangeListener<Piper.CommandInvocation> {
             override fun valueChanged(value: Piper.CommandInvocation?) {
                 onChange()
+                notifyCommandChange(value)
             }
         })
 
         add(JScrollPane(content), BorderLayout.CENTER)
+    }
+
+    private fun notifyCommandChange(value: Piper.CommandInvocation?) {
+        commandChangeListeners.forEach { it(value) }
     }
 
     fun display(state: WorkspaceCommandState?) {
@@ -391,6 +371,7 @@ class WorkspaceCommandPanel(
         ansiCheck?.isSelected = state?.usesAnsi ?: false
         dependenciesField?.text = state?.dependencies?.joinToString(", ") ?: ""
         tagsField?.text = state?.tags?.joinToString(", ") ?: ""
+        notifyCommandChange(commandEditor.value)
     }
 
     fun snapshot(): WorkspaceCommandState {
@@ -409,6 +390,13 @@ class WorkspaceCommandPanel(
             dependencies = dependencies,
             tags = tags,
         )
+    }
+
+    fun requireCommand(): Piper.CommandInvocation = commandEditor.requireValue()
+
+    fun addCommandChangeListener(listener: (Piper.CommandInvocation?) -> Unit) {
+        commandChangeListeners += listener
+        listener(commandEditor.value)
     }
 }
 

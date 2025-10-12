@@ -197,7 +197,7 @@ class MinimalToolWidget(tool: Piper.MinimalTool, private val panel: Container, c
 
     fun toMinimalTool(): Piper.MinimalTool {
         if (tfName.text.isEmpty()) throw RuntimeException("Name cannot be empty.")
-        val command = cciw.value ?: throw RuntimeException("Command must be specified")
+        val command = cciw.requireValue()
         try {
             if (cbEnabled.isSelected) command.checkDependencies()
         } catch (c: DependencyException) {
@@ -434,20 +434,151 @@ class CollapsedMessageMatchWidget(
     }
 }
 
-class CollapsedCommandInvocationWidget(w: Window, cmd: Piper.CommandInvocation, private val purpose: CommandInvocationPurpose, private val showPassHeaders: Boolean = true) :
-        CollapsedWidget<Piper.CommandInvocation>(w, cmd, "Command: ", removable = (purpose == CommandInvocationPurpose.MATCH_FILTER)) {
+class CollapsedCommandInvocationWidget(
+    private val window: Window,
+    cmd: Piper.CommandInvocation,
+    private val purpose: CommandInvocationPurpose,
+    private val showPassHeaders: Boolean = true,
+    private val placeholderValues: List<String> = DEFAULT_COMMAND_TOKEN_PLACEHOLDERS,
+) {
 
-    override fun toHumanReadable(): String = (if (purpose == CommandInvocationPurpose.MATCH_FILTER) value?.toHumanReadable(negation = false) else value?.commandLine) ?: "(no command)"
-    override fun editDialog(value: Piper.CommandInvocation, parent: Component): Piper.CommandInvocation? =
-            CommandInvocationDialog(value, purpose = purpose, parent = parent, showPassHeaders = showPassHeaders).showGUI()
+    private val changeListeners = mutableListOf<ChangeListener<Piper.CommandInvocation>>()
+    private val enableCheck = if (purpose == CommandInvocationPurpose.MATCH_FILTER) JCheckBox("Enable command") else null
+    private val btnCopy = JButton("Copy")
+    private val btnPaste = JButton("Paste")
+    private val btnClear = if (purpose == CommandInvocationPurpose.MATCH_FILTER) JButton("Clear") else null
+    private val editorPanel = CommandInvocationEditorPanel(
+        window,
+        window,
+        cmd,
+        purpose,
+        showPassHeaders,
+        placeholderValues,
+    )
+    private val editorContainer = JPanel(BorderLayout()).apply {
+        border = BorderFactory.createEmptyBorder(4, 8, 8, 8)
+        add(editorPanel, BorderLayout.CENTER)
+    }
+    private val defaultCommand = Piper.CommandInvocation.getDefaultInstance()
+    private var suppressEditorUpdates = false
+    private var internalValue: Piper.CommandInvocation?
+    private var lastDefinedValue: Piper.CommandInvocation
 
-    override val asMap: Map<String, Any>?
-        get() = value?.toMap()
+    init {
+        lastDefinedValue = if (cmd == defaultCommand) defaultCommand else cmd
+        internalValue = if (purpose == CommandInvocationPurpose.MATCH_FILTER && cmd == defaultCommand) null else lastDefinedValue
+        editorPanel.setValue(lastDefinedValue)
 
-    override fun parseMap(map: Map<String, Any>): Piper.CommandInvocation = commandInvocationFromMap(map)
+        editorPanel.addChangeListener {
+            if (internalValue == null || suppressEditorUpdates) return@addChangeListener
+            val updated = readCurrentCommand(showErrors = false) ?: return@addChangeListener
+            internalValue = updated
+            lastDefinedValue = updated
+            notifyListeners()
+        }
 
-    override val default: Piper.CommandInvocation
-        get() = Piper.CommandInvocation.getDefaultInstance()
+        enableCheck?.addActionListener {
+            if (enableCheck.isSelected) {
+                value = lastDefinedValue
+            } else {
+                readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
+                internalValue = null
+                updateState()
+                notifyListeners()
+            }
+        }
+
+        btnCopy.addActionListener {
+            val current = internalValue ?: return@addActionListener
+            Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(Dump(DumpSettingsBuilder().build()).dumpToString(current.toMap())), null)
+        }
+
+        btnPaste.addActionListener {
+            val clip = Toolkit.getDefaultToolkit().systemClipboard
+            val text = clip.getData(DataFlavor.stringFlavor) as? String ?: return@addActionListener
+            val loader = Load(LoadSettingsBuilder().build())
+            try {
+                val parsed = commandInvocationFromMap(loader.loadFromString(text) as Map<String, Any>)
+                value = parsed
+            } catch (e: Exception) {
+                JOptionPane.showMessageDialog(window, e.message)
+            }
+        }
+
+        btnClear?.addActionListener {
+            readCurrentCommand(showErrors = false)?.let { lastDefinedValue = it }
+            value = null
+        }
+
+        updateState()
+    }
+
+    var value: Piper.CommandInvocation?
+        get() = internalValue
+        set(newValue) {
+            internalValue = newValue
+            if (newValue != null) {
+                lastDefinedValue = newValue
+                suppressEditorUpdates = true
+                editorPanel.setValue(newValue)
+                suppressEditorUpdates = false
+            }
+            updateState()
+            notifyListeners()
+        }
+
+    private fun readCurrentCommand(showErrors: Boolean): Piper.CommandInvocation? = try {
+        editorPanel.buildCommand()
+    } catch (e: RuntimeException) {
+        if (showErrors) JOptionPane.showMessageDialog(window, e.message)
+        null
+    }
+
+    private fun updateState() {
+        val enabled = internalValue != null || purpose != CommandInvocationPurpose.MATCH_FILTER
+        enableCheck?.isSelected = internalValue != null
+        btnCopy.isEnabled = internalValue != null
+        btnClear?.isEnabled = internalValue != null
+        editorContainer.isVisible = enabled
+        setPanelEnabled(editorPanel, internalValue != null || purpose != CommandInvocationPurpose.MATCH_FILTER)
+    }
+
+    private fun setPanelEnabled(component: Component, enabled: Boolean) {
+        component.isEnabled = enabled
+        if (component is Container) {
+            component.components.forEach { setPanelEnabled(it, enabled) }
+        }
+    }
+
+    private fun notifyListeners() {
+        changeListeners.forEach { it.valueChanged(internalValue) }
+    }
+
+    fun requireValue(): Piper.CommandInvocation {
+        val command = readCurrentCommand(showErrors = true)
+        if (command != null) {
+            internalValue = command
+            return command
+        }
+        throw CancelClosingWindow()
+    }
+
+    fun addChangeListener(listener: ChangeListener<Piper.CommandInvocation>) {
+        changeListeners += listener
+        listener.valueChanged(internalValue)
+    }
+
+    fun buildGUI(panel: Container, cs: GridBagConstraints) {
+        addFullWidthComponent(JLabel("Command:"), panel, cs)
+        val controls = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+            enableCheck?.let { add(it) }
+            add(btnCopy)
+            add(btnPaste)
+            btnClear?.let { add(it) }
+        }
+        addFullWidthComponent(controls, panel, cs)
+        addFullWidthComponent(editorContainer, panel, cs)
+    }
 }
 
 abstract class ConfigDialog<E>(private val parent: Component?, private val caption: String) : JDialog() {
@@ -703,6 +834,12 @@ fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Conta
     return widget
 }
 
+private fun simpleDocumentListener(onChange: () -> Unit): javax.swing.event.DocumentListener = object : javax.swing.event.DocumentListener {
+    override fun insertUpdate(e: javax.swing.event.DocumentEvent?) = onChange()
+    override fun removeUpdate(e: javax.swing.event.DocumentEvent?) = onChange()
+    override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = onChange()
+}
+
 class HeaderMatchDialog(hm: Piper.HeaderMatch, parent: Component) : ConfigDialog<Piper.HeaderMatch>(parent, "Header filter editor") {
     private val commonHeaders = arrayOf("Content-Disposition", "Content-Type", "Cookie",
             "Host", "Origin", "Referer", "Server", "User-Agent", "X-Requested-With")
@@ -724,109 +861,181 @@ const val CMDLINE_INPUT_FILENAME_PLACEHOLDER = INPUT_FILENAME_TOKEN
 const val PASS_HTTP_HEADERS_NOTE = "<html>Note: if the above checkbox is <font color='red'>unchecked</font>, messages without a body (such as<br>" +
         "GET/HEAD requests or 204 No Content responses) are <font color='red'>ignored by this tool</font>.</html>"
 
-class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: CommandInvocationPurpose, parent: Component,
-                              showPassHeaders: Boolean) : ConfigDialog<Piper.CommandInvocation>(parent, "Command invocation editor") {
-    private val ccmwStdout = CollapsedMessageMatchWidget(this, mm = ci.stdout, showHeaderMatch = false, caption = "Match on stdout: ")
-    private val ccmwStderr = CollapsedMessageMatchWidget(this, mm = ci.stderr, showHeaderMatch = false, caption = "Match on stderr: ")
-    private var tfExitCode: JTextField? = null
-    private val cbPassHeaders: JCheckBox?
-    private val tfDependencies = JTextField()
-    private val tokensPanel = CommandTokensPanel()
-    private val parameterEditor = CommandParameterListEditor(ci.parameterList, this)
+private class CommandInvocationEditorPanel(
+    private val window: Window,
+    private val parent: Component?,
+    initial: Piper.CommandInvocation,
+    private val purpose: CommandInvocationPurpose,
+    private val showPassHeaders: Boolean,
+    private val placeholderValues: List<String>,
+) : JPanel(GridBagLayout()) {
 
-    fun parseExitCodeList(): Iterable<Int> {
-        val text = tfExitCode!!.text
-        return if (text.isEmpty()) emptyList()
-        else text.filterNot(Char::isWhitespace).split(',').map(String::toInt)
-    }
+    private val changeListeners = mutableListOf<() -> Unit>()
+    private val tokensPanel = CommandTokensPanel(
+        onChange = { emitChange() },
+        placeholderValues = placeholderValues,
+    )
+    private val parameterEditor = CommandParameterListEditor(initial.parameterList, parent)
+    private val cbPassHeaders = if (showPassHeaders) JCheckBox("Pass HTTP headers to command") else null
+    private val dependenciesField = JTextField()
+    private val stdoutPanel = if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        CollapsedMessageMatchWidget(window, initial.stdout, showHeaderMatch = false, caption = "Match on stdout: ")
+    } else null
+    private val stderrPanel = if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        CollapsedMessageMatchWidget(window, initial.stderr, showHeaderMatch = false, caption = "Match on stderr: ")
+    } else null
+    private val exitCodeField: JTextField?
+    private var suppressEvents = false
 
     init {
-        addFullWidthComponent(tokensPanel, panel, cs)
-        tokensPanel.setTokens(toTokenList(ci))
+        val cs = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            fill = GridBagConstraints.HORIZONTAL
+            anchor = GridBagConstraints.WEST
+            weightx = 1.0
+            insets = Insets(4, 0, 4, 0)
+        }
 
-        addFullWidthComponent(parameterEditor, panel, cs)
+        addFullWidthComponent(tokensPanel, this, cs)
+        tokensPanel.setTokens(toTokenList(initial))
 
-        cbPassHeaders = if (showPassHeaders) {
-            val cb = createFullWidthCheckBox("Pass HTTP headers to command", ci.passHeaders, panel, cs)
-            addFullWidthComponent(JLabel(PASS_HTTP_HEADERS_NOTE), panel, cs)
-            cb
-        } else null
+        addFullWidthComponent(parameterEditor, this, cs)
+        parameterEditor.addChangeListener { emitChange() }
 
-        addFullWidthComponent(JLabel("Binaries required in PATH: (comma separated)"), panel, cs)
-        addFullWidthComponent(tfDependencies, panel, cs)
-        tfDependencies.text = ci.requiredInPathList.joinToString(separator = ", ")
+        cbPassHeaders?.let { checkbox ->
+            addFullWidthComponent(checkbox, this, cs)
+            addFullWidthComponent(JLabel(PASS_HTTP_HEADERS_NOTE), this, cs)
+            checkbox.addActionListener { emitChange() }
+        }
+
+        addFullWidthComponent(JLabel("Binaries required in PATH: (comma separated)"), this, cs)
+        dependenciesField.text = initial.extractDependencies().joinToString(separator = ", ")
+        addFullWidthComponent(dependenciesField, this, cs)
+        dependenciesField.document.addDocumentListener(simpleDocumentListener { emitChange() })
 
         if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
-            val exitValues = ci.exitCodeList.joinToString(", ")
-
             if (purpose == CommandInvocationPurpose.SELF_FILTER) {
-                addFullWidthComponent(JLabel("If any filters are set below, they are treated the same way as a pre-exec filter."), panel, cs)
+                addFullWidthComponent(JLabel("If any filters are set below, they are treated the same way as a pre-exec filter."), this, cs)
             }
-            ccmwStdout.buildGUI(panel, cs)
-            ccmwStderr.buildGUI(panel, cs)
-            val tfExitCode = createLabeledTextField("Match on exit code: (comma separated) ", exitValues, panel, cs)
+            stdoutPanel!!.buildGUI(this, cs)
+            stdoutPanel.addChangeListener(object : ChangeListener<Piper.MessageMatch> {
+                override fun valueChanged(value: Piper.MessageMatch?) {
+                    emitChange()
+                }
+            })
 
-            tfExitCode.inputVerifier = object : InputVerifier() {
-                override fun verify(input: JComponent?): Boolean =
-                        try {
-                            parseExitCodeList(); true
-                        } catch (e: NumberFormatException) {
-                            false
-                        }
-            }
+            stderrPanel!!.buildGUI(this, cs)
+            stderrPanel.addChangeListener(object : ChangeListener<Piper.MessageMatch> {
+                override fun valueChanged(value: Piper.MessageMatch?) {
+                    emitChange()
+                }
+            })
 
-            this.tfExitCode = tfExitCode
+            val exitValues = initial.exitCodeList.joinToString(", ")
+            val field = createLabeledTextField("Match on exit code: (comma separated) ", exitValues, this, cs)
+            field.document.addDocumentListener(simpleDocumentListener { emitChange() })
+            exitCodeField = field
+        } else {
+            exitCodeField = null
         }
     }
 
-    override fun processGUI(): Piper.CommandInvocation = Piper.CommandInvocation.newBuilder().apply {
+    fun setValue(command: Piper.CommandInvocation) {
+        suppressEvents = true
+        tokensPanel.setTokens(toTokenList(command))
+        parameterEditor.setItems(command.parameterList)
+        cbPassHeaders?.isSelected = command.passHeaders
+        dependenciesField.text = command.extractDependencies().joinToString(separator = ", ")
         if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
-            if (ccmwStdout.value != null) stdout = ccmwStdout.value
-            if (ccmwStderr.value != null) stderr = ccmwStderr.value
-            try {
-                addAllExitCode(parseExitCodeList())
-            } catch (e: NumberFormatException) {
-                throw RuntimeException("Exit codes should contain numbers separated by commas only. (Whitespace is ignored.)")
+            stdoutPanel!!.value = command.stdout
+            stderrPanel!!.value = command.stderr
+            exitCodeField?.text = command.exitCodeList.joinToString(", ")
+        }
+        suppressEvents = false
+    }
+
+    fun buildCommand(): Piper.CommandInvocation {
+        return Piper.CommandInvocation.newBuilder().apply {
+            if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+                if (stdoutPanel?.value != null) stdout = stdoutPanel.value
+                if (stderrPanel?.value != null) stderr = stderrPanel.value
+                val exitCodesText = exitCodeField?.text.orEmpty()
+                if (exitCodesText.isNotBlank()) {
+                    try {
+                        addAllExitCode(exitCodesText.filterNot(Char::isWhitespace).split(',').map(String::toInt))
+                    } catch (e: NumberFormatException) {
+                        throw RuntimeException("Exit codes should contain numbers separated by commas only. (Whitespace is ignored.)")
+                    }
+                }
+                val hasExitCodes = exitCodeField?.text?.isNotBlank() == true
+                val hasStdout = stdoutPanel?.value != null
+                val hasStderr = stderrPanel?.value != null
+                if (purpose == CommandInvocationPurpose.MATCH_FILTER && !(hasStdout || hasStderr || hasExitCodes)) {
+                    throw RuntimeException("No filters are defined for stdio or exit code.")
+                }
             }
-            val hasExitCodes = tfExitCode?.text?.isNotBlank() == true
-            val hasStdoutFilter = ccmwStdout.value != null
-            val hasStderrFilter = ccmwStderr.value != null
-            if (purpose == CommandInvocationPurpose.MATCH_FILTER && !(hasStdoutFilter || hasStderrFilter || hasExitCodes)) {
-                throw RuntimeException("No filters are defined for stdio or exit code.")
+
+            val dependencies = dependenciesField.text.replace("\\s".toRegex(), "")
+            if (dependencies.isNotEmpty()) addAllRequiredInPath(dependencies.split(','))
+
+            val tokens = tokensPanel.tokens()
+            if (tokens.isEmpty()) {
+                throw RuntimeException("The command must contain at least one argument.")
             }
-        }
-        val d = tfDependencies.text.replace("\\s".toRegex(), "")
-        if (d.isNotEmpty()) addAllRequiredInPath(d.split(','))
-        val tokens = tokensPanel.tokens()
-        if (tokens.isEmpty()) {
-            throw RuntimeException("The command must contain at least one argument.")
-        }
-        if (tokens.first().isBlank()) {
-            throw RuntimeException("The first argument (the command) cannot be empty.")
-        }
-        val filenameIndices = tokens.withIndex().filter { it.value == INPUT_FILENAME_TOKEN }.map { it.index }
-        if (filenameIndices.size > 1) {
-            throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder may only appear once in the command.")
-        }
-        val placeholderIndex = filenameIndices.firstOrNull()
-        val prefixTokens = if (placeholderIndex != null) tokens.subList(0, placeholderIndex) else tokens
-        addAllPrefix(prefixTokens)
-        if (placeholderIndex != null) {
-            if (placeholderIndex == 0) {
-                throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder must appear after the executable name.")
+            if (tokens.first().isBlank()) {
+                throw RuntimeException("The first argument (the command) cannot be empty.")
             }
-            inputMethod = Piper.CommandInvocation.InputMethod.FILENAME
-            val postfixTokens = if (placeholderIndex + 1 < tokens.size) tokens.subList(placeholderIndex + 1, tokens.size) else emptyList()
-            addAllPostfix(postfixTokens)
-        }
-        val parameterItems = parameterEditor.items.toList()
-        val duplicateNames = parameterItems.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
-        if (duplicateNames.isNotEmpty()) {
-            throw RuntimeException("Parameter names must be unique: ${duplicateNames.joinToString(", ")}")
-        }
-        addAllParameter(parameterItems)
-        if (cbPassHeaders?.isSelected == true) passHeaders = true
-    }.build()
+            val filenameIndices = tokens.withIndex().filter { it.value == INPUT_FILENAME_TOKEN }.map { it.index }
+            if (filenameIndices.size > 1) {
+                throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder may only appear once in the command.")
+            }
+            val placeholderIndex = filenameIndices.firstOrNull()
+            val prefixTokens = if (placeholderIndex != null) tokens.subList(0, placeholderIndex) else tokens
+            addAllPrefix(prefixTokens)
+            if (placeholderIndex != null) {
+                if (placeholderIndex == 0) {
+                    throw RuntimeException("The ${INPUT_FILENAME_TOKEN} placeholder must appear after the executable name.")
+                }
+                inputMethod = Piper.CommandInvocation.InputMethod.FILENAME
+                val postfixTokens = if (placeholderIndex + 1 < tokens.size) tokens.subList(placeholderIndex + 1, tokens.size) else emptyList()
+                addAllPostfix(postfixTokens)
+            }
+
+            val parameterItems = parameterEditor.items.toList()
+            val duplicateNames = parameterItems.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+            if (duplicateNames.isNotEmpty()) {
+                throw RuntimeException("Parameter names must be unique: ${duplicateNames.joinToString(", ")}")
+            }
+            addAllParameter(parameterItems)
+            if (cbPassHeaders?.isSelected == true) passHeaders = true
+        }.build()
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        changeListeners += listener
+    }
+
+    private fun emitChange() {
+        if (suppressEvents) return
+        changeListeners.forEach { it.invoke() }
+    }
+}
+
+class CommandInvocationDialog(
+    ci: Piper.CommandInvocation,
+    private val purpose: CommandInvocationPurpose,
+    parent: Component,
+    showPassHeaders: Boolean,
+    placeholderValues: List<String> = DEFAULT_COMMAND_TOKEN_PLACEHOLDERS,
+) : ConfigDialog<Piper.CommandInvocation>(parent, "Command invocation editor") {
+    private val editor = CommandInvocationEditorPanel(this, parent, ci, purpose, showPassHeaders, placeholderValues)
+
+    init {
+        addFullWidthComponent(editor, panel, cs)
+    }
+
+    override fun processGUI(): Piper.CommandInvocation = editor.buildCommand()
 }
 
 private fun toTokenList(ci: Piper.CommandInvocation): List<String> {
@@ -859,6 +1068,18 @@ private class CommandParameterListEditor(
 
     val items: Iterable<Piper.CommandInvocation.Parameter>
         get() = model.toIterable()
+
+    fun addChangeListener(listener: () -> Unit) {
+        model.addListDataListener(object : ListDataListener {
+            override fun intervalAdded(e: ListDataEvent?) = listener()
+            override fun intervalRemoved(e: ListDataEvent?) = listener()
+            override fun contentsChanged(e: ListDataEvent?) = listener()
+        })
+    }
+
+    fun setItems(items: List<Piper.CommandInvocation.Parameter>) {
+        fillDefaultModel(items, model)
+    }
 }
 
 private class CommandParameterDialog(

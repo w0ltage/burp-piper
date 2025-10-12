@@ -19,7 +19,7 @@ import javax.swing.JPopupMenu
 import javax.swing.JScrollPane
 import javax.swing.ListSelectionModel
 
-private val DEFAULT_TOKEN_PLACEHOLDERS = listOf(
+val DEFAULT_COMMAND_TOKEN_PLACEHOLDERS = listOf(
     "\${BASE}",
     "\${PAYLOAD_INDEX}",
     "\${dialog0}",
@@ -29,7 +29,7 @@ private val DEFAULT_TOKEN_PLACEHOLDERS = listOf(
 
 class CommandTokensPanel(
     private val onChange: () -> Unit = {},
-    private val placeholderValues: List<String> = DEFAULT_TOKEN_PLACEHOLDERS,
+    private val placeholderValues: List<String> = DEFAULT_COMMAND_TOKEN_PLACEHOLDERS,
 ) : JPanel(BorderLayout()) {
 
     private val tokensModel = DefaultListModel<String>()
