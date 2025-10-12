@@ -552,64 +552,6 @@ private class MinimalToolManagerPanel<T>(
     override fun lostOwnership(clipboard: java.awt.datatransfer.Clipboard?, contents: Transferable?) {}
 }
 
-fun createMessageViewerManager(
-    model: DefaultListModel<Piper.MessageViewer>,
-    parent: Component?,
-    commentatorModel: DefaultListModel<Piper.Commentator>,
-    switchToCommentator: () -> Unit,
-): Component {
-    return MinimalToolManagerPanel(
-        model,
-        parent,
-        extractor = { it.common },
-        editorFactory = { MessageViewerInlineEditor(it, commentatorModel, switchToCommentator) },
-        newButtonLabel = "+ New message viewer",
-        defaultFactory = { Piper.MessageViewer.getDefaultInstance() },
-        cloneFactory = { it },
-        toggleFactory = { it.buildEnabled(!it.common.enabled) },
-        toMap = { it.toMap() },
-        fromMap = { messageViewerFromMap(it) },
-    )
-}
-
-private class MessageViewerInlineEditor(
-    parent: Component?,
-    private val commentatorModel: DefaultListModel<Piper.Commentator>,
-    private val switchToCommentator: () -> Unit,
-) : MinimalToolInlineEditor<Piper.MessageViewer>(
-    parent,
-    MinimalToolEditorConfig(showScope = true),
-) {
-    private lateinit var usesColorsCheckBox: JCheckBox
-    private lateinit var convertButton: JButton
-
-    override fun extractCommon(value: Piper.MessageViewer): Piper.MinimalTool = value.common
-
-    override fun addCustomFields(value: Piper.MessageViewer, panel: Container, cs: GridBagConstraints) {
-        usesColorsCheckBox = createFullWidthCheckBox("Uses ANSI (color) escape sequences", value.usesColors, panel, cs)
-        convertButton = JButton("Convert to commentator").apply {
-            putClientProperty("skip-dirty", true)
-            addActionListener {
-                val minimal = minimalToolWidget()?.toMinimalTool() ?: return@addActionListener
-                commentatorModel.addElement(
-                    Piper.Commentator.newBuilder().setCommon(minimal).build(),
-                )
-                switchToCommentator()
-            }
-        }
-        cs.gridy++
-        cs.gridx = 0
-        cs.gridwidth = 4
-        panel.add(convertButton, cs)
-    }
-
-    override fun buildUpdatedValue(original: Piper.MessageViewer, common: Piper.MinimalTool): Piper.MessageViewer =
-        Piper.MessageViewer.newBuilder().apply {
-            this.common = common
-            if (usesColorsCheckBox.isSelected) usesColors = true
-        }.build()
-}
-
 private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(parent, MinimalToolEditorConfig()) {
     private lateinit var hasGUICheckBox: JCheckBox
     private lateinit var avoidPipeCheckBox: JCheckBox
@@ -720,25 +662,6 @@ private class HttpListenerInlineEditor(parent: Component?) : MinimalToolInlineEd
         }.build()
 }
 
-private class CommentatorInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.Commentator>(parent, MinimalToolEditorConfig(showScope = true)) {
-    private lateinit var overwriteCheckBox: JCheckBox
-    private lateinit var listenerCheckBox: JCheckBox
-
-    override fun extractCommon(value: Piper.Commentator): Piper.MinimalTool = value.common
-
-    override fun addCustomFields(value: Piper.Commentator, panel: Container, cs: GridBagConstraints) {
-        overwriteCheckBox = createFullWidthCheckBox("Overwrite comments on items that already have one", value.overwrite, panel, cs)
-        listenerCheckBox = createFullWidthCheckBox("Continuously apply to future requests/responses", value.applyWithListener, panel, cs)
-    }
-
-    override fun buildUpdatedValue(original: Piper.Commentator, common: Piper.MinimalTool): Piper.Commentator =
-        Piper.Commentator.newBuilder().apply {
-            this.common = common
-            if (overwriteCheckBox.isSelected) overwrite = true
-            if (listenerCheckBox.isSelected) applyWithListener = true
-        }.build()
-}
-
 private class HighlighterInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.Highlighter>(parent, MinimalToolEditorConfig(showScope = true)) {
     private lateinit var overwriteCheckBox: JCheckBox
     private lateinit var listenerCheckBox: JCheckBox
@@ -830,24 +753,6 @@ fun createHttpListenerManager(
         toggleFactory = { it.buildEnabled(!it.common.enabled) },
         toMap = { it.toMap() },
         fromMap = { httpListenerFromMap(it) },
-    )
-}
-
-fun createCommentatorManager(
-    model: DefaultListModel<Piper.Commentator>,
-    parent: Component?,
-): Component {
-    return MinimalToolManagerPanel(
-        model,
-        parent,
-        extractor = { it.common },
-        editorFactory = { CommentatorInlineEditor(it) },
-        newButtonLabel = "+ New commentator",
-        defaultFactory = { Piper.Commentator.getDefaultInstance() },
-        cloneFactory = { it.toBuilder().build() },
-        toggleFactory = { it.buildEnabled(!it.common.enabled) },
-        toMap = { it.toMap() },
-        fromMap = { commentatorFromMap(it) },
     )
 }
 
