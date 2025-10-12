@@ -4,19 +4,10 @@ import java.awt.Component
 import javax.swing.JCheckBox
 import javax.swing.JTabbedPane
 
-/**
- * Populate the shared Piper configuration tabs on the supplied [JTabbedPane].
- *
- * The [queueComponentProvider] parameter allows callers to lazily provide a
- * component for the legacy queue functionality. Passing `null` will omit the
- * queue tab, which is useful for environments where it is not available (for
- * example the Montoya API).
- */
 fun populatePiperTabs(
     tabs: JTabbedPane,
     cfg: ConfigModel,
     parent: Component?,
-    queueComponentProvider: (() -> Component)? = null,
 ) {
     val switchToCommentator = {
         val index = tabs.indexOfTab("Commentators")
@@ -90,10 +81,6 @@ fun populatePiperTabs(
             parent,
         ),
     )
-
-    queueComponentProvider?.invoke()?.let { queueComponent ->
-        tabs.addTab("Queue", queueComponent)
-    }
 
     tabs.addTab("Load/Save configuration", createLoadSaveUI(cfg, parent))
     tabs.addTab("Developer", createDeveloperUI(cfg))

@@ -20,7 +20,6 @@ import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpResponseEditor
 import burp.api.montoya.ui.editor.extension.HttpRequestEditorProvider
 import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
 import burp.api.montoya.utilities.ByteUtils
-import java.awt.BorderLayout
 import java.awt.Component
 import java.io.BufferedReader
 import java.io.File
@@ -37,8 +36,6 @@ import kotlin.text.Charsets
 import com.redpois0n.terminal.JTerminal
 import javax.swing.DefaultListModel
 import javax.swing.JTabbedPane
-import javax.swing.JLabel
-import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTextArea
 import javax.swing.SwingUtilities
@@ -105,15 +102,8 @@ class MontoyaExtension : BurpExtension {
 
         messageViewerManager = MontoyaMessageViewerManager(configModel.messageViewersModel)
 
-        val queuePlaceholder = JPanel(BorderLayout()).apply {
-            add(
-                JLabel("Queue processing is available when using the legacy Burp Extender API."),
-                BorderLayout.NORTH,
-            )
-        }
-
         suiteTabs = JTabbedPane()
-        populatePiperTabs(suiteTabs, configModel, parent = null) { queuePlaceholder }
+        populatePiperTabs(suiteTabs, configModel, parent = null)
         suiteTabRegistration = api.userInterface().registerSuiteTab(NAME, suiteTabs)
         api.logging().logToOutput("Piper suite tab registered")
 
