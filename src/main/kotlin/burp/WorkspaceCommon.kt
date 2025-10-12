@@ -1,9 +1,11 @@
 package burp
 
+import com.google.protobuf.ByteString
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.Container
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
@@ -16,10 +18,12 @@ import java.time.format.DateTimeFormatter
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
+import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JComboBox
+import javax.swing.JList
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JScrollPane
@@ -32,6 +36,8 @@ import javax.swing.SwingUtilities
 import javax.swing.border.EmptyBorder
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
+import javax.swing.text.JTextComponent
+import javax.swing.ListSelectionModel
 import kotlin.concurrent.thread
 
 private const val DEFAULT_SAMPLE_INPUT = "GET /example HTTP/1.1\nHost: example.com\n\n"
@@ -52,6 +58,8 @@ data class WorkspaceHeaderValues<T>(
 open class WorkspaceHeaderPanel<T>(
     private val templateLabel: String,
     private val onChange: () -> Unit,
+    private val includeTagsField: Boolean = true,
+    private val includeTemplateField: Boolean = true,
 ) : JPanel(GridBagLayout()) {
 
     val nameField = JTextField()
@@ -59,35 +67,49 @@ open class WorkspaceHeaderPanel<T>(
     val tagsField = JTextField()
     val templateCombo = JComboBox<T>()
 
+    private var templateRowIndex = -1
     private var templateRowNextGridx = 2
     private var suppressTemplateEvent = false
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
 
-        addLabel("Name", 0, 0)
-        addComponent(nameField, gridx = 1, gridy = 0, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
-        addComponent(enabledToggle, gridx = 2, gridy = 0)
+        var row = 0
+        addLabel("Name", 0, row)
+        addComponent(nameField, gridx = 1, gridy = row, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
+        addComponent(enabledToggle, gridx = 2, gridy = row)
 
-        addLabel("Tags", 0, 1)
-        addComponent(tagsField, gridx = 1, gridy = 1, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
+        if (includeTagsField) {
+            row++
+            addLabel("Tags", 0, row)
+            addComponent(tagsField, gridx = 1, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
+        }
 
-        addLabel(templateLabel, 0, 2)
-        addComponent(templateCombo, gridx = 1, gridy = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
+        if (includeTemplateField) {
+            row++
+            templateRowIndex = row
+            addLabel(templateLabel, 0, row)
+            addComponent(templateCombo, gridx = 1, gridy = row, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
+        }
 
         nameField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
+        if (includeTagsField) {
+            tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
+        }
         enabledToggle.addActionListener { onChange() }
-        templateCombo.addActionListener {
-            if (!suppressTemplateEvent) {
-                onChange()
+        if (includeTemplateField) {
+            templateCombo.addActionListener {
+                if (!suppressTemplateEvent) {
+                    onChange()
+                }
             }
         }
     }
 
     protected fun addTemplateField(label: String, component: JComponent) {
-        addLabel(label, templateRowNextGridx, TEMPLATE_ROW)
-        addComponent(component, gridx = templateRowNextGridx + 1, gridy = TEMPLATE_ROW)
+        if (!includeTemplateField || templateRowIndex < 0) return
+        addLabel(label, templateRowNextGridx, templateRowIndex)
+        addComponent(component, gridx = templateRowNextGridx + 1, gridy = templateRowIndex)
         templateRowNextGridx += 2
     }
 
@@ -103,26 +125,38 @@ open class WorkspaceHeaderPanel<T>(
     fun setFieldsEnabled(enabled: Boolean) {
         nameField.isEnabled = enabled
         enabledToggle.isEnabled = enabled
-        tagsField.isEnabled = enabled
-        templateCombo.isEnabled = enabled
+        if (includeTagsField) {
+            tagsField.isEnabled = enabled
+        }
+        if (includeTemplateField) {
+            templateCombo.isEnabled = enabled
+        }
     }
 
     fun readValues(): WorkspaceHeaderValues<T> = WorkspaceHeaderValues(
         name = nameField.text,
         enabled = enabledToggle.isSelected,
-        tags = tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) },
-        template = templateCombo.selectedItem as? T,
+        tags = if (includeTagsField) {
+            tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+        } else {
+            emptyList()
+        },
+        template = if (includeTemplateField) templateCombo.selectedItem as? T else null,
     )
 
     fun setValues(values: WorkspaceHeaderValues<T>) {
         nameField.text = values.name
         enabledToggle.isSelected = values.enabled
-        tagsField.text = values.tags.joinToString(", ")
-        withTemplateChangeSuppressed {
-            when {
-                values.template != null -> templateCombo.selectedItem = values.template
-                templateCombo.itemCount > 0 -> templateCombo.selectedIndex = 0
-                else -> templateCombo.selectedIndex = -1
+        if (includeTagsField) {
+            tagsField.text = values.tags.joinToString(", ")
+        }
+        if (includeTemplateField) {
+            withTemplateChangeSuppressed {
+                when {
+                    values.template != null -> templateCombo.selectedItem = values.template
+                    templateCombo.itemCount > 0 -> templateCombo.selectedIndex = 0
+                    else -> templateCombo.selectedIndex = -1
+                }
             }
         }
     }
@@ -154,9 +188,6 @@ open class WorkspaceHeaderPanel<T>(
         this.anchor = GridBagConstraints.WEST
     }
 
-    companion object {
-        private const val TEMPLATE_ROW = 2
-    }
 }
 
 class WorkspaceOverviewPanel<T>(
@@ -265,12 +296,382 @@ class MessageMatchInlinePanel(parent: Component?) : JPanel(BorderLayout()) {
     }
 }
 
+class MessageMatchEditorPanel(
+    parent: Component?,
+    private val showHeaderMatch: Boolean = true,
+) : JPanel(BorderLayout()) {
+
+    private val enableToggle = JCheckBox("Enable filter")
+    private val form = MessageMatchForm(parent, showHeaderMatch)
+    private val listeners = mutableListOf<() -> Unit>()
+    private var suppressNotifications = false
+
+    init {
+        border = EmptyBorder(8, 8, 8, 8)
+        val container = JPanel()
+        container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
+        enableToggle.addActionListener {
+            updateFormEnabled()
+            notifyChanged()
+        }
+        enableToggle.alignmentX = Component.LEFT_ALIGNMENT
+        container.add(enableToggle)
+        container.add(Box.createVerticalStrut(8))
+        form.alignmentX = Component.LEFT_ALIGNMENT
+        container.add(form)
+        add(container, BorderLayout.NORTH)
+        form.addChangeListener { notifyChanged() }
+        updateFormEnabled()
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        listeners += listener
+    }
+
+    fun display(value: Piper.MessageMatch?) {
+        suppressNotifications = true
+        try {
+            val hasValue = value != null && !value.equals(Piper.MessageMatch.getDefaultInstance())
+            enableToggle.isSelected = hasValue
+            form.display(value ?: Piper.MessageMatch.getDefaultInstance())
+            updateFormEnabled()
+        } finally {
+            suppressNotifications = false
+        }
+    }
+
+    fun value(): Piper.MessageMatch? {
+        if (!enableToggle.isSelected) {
+            return null
+        }
+        return form.snapshot()
+    }
+
+    private fun updateFormEnabled() {
+        form.setFormEnabled(enableToggle.isSelected)
+    }
+
+    private fun notifyChanged() {
+        if (suppressNotifications) return
+        listeners.forEach { it.invoke() }
+    }
+}
+
+private class MessageMatchForm(
+    private val parent: Component?,
+    private val showHeaderMatch: Boolean,
+) : JPanel(GridBagLayout()) {
+
+    private val changeListeners = mutableListOf<() -> Unit>()
+    private var suppressNotifications = false
+    private val negationBox = JComboBox(MatchNegation.values())
+    private val prefixField = HexASCIITextField("prefix", ByteString.EMPTY, parent ?: this)
+    private val postfixField = HexASCIITextField("postfix", ByteString.EMPTY, parent ?: this)
+    private val regexWidget: RegExpWidget
+    private val headerEditor = if (showHeaderMatch) HeaderMatchEditorPanel(parent) else null
+    private val commandEditor = CommandInvocationEditor(
+        parent,
+        CommandInvocationPurpose.MATCH_FILTER,
+        showPassHeaders = false,
+    )
+    private val inScopeCheck = if (showHeaderMatch) JCheckBox("Request is in Burp Suite scope") else null
+    private val andPanel = MessageMatchListPanel(parent, "All of these apply: [AND]", showHeaderMatch)
+    private val orPanel = MessageMatchListPanel(parent, "Any of these apply: [OR]", showHeaderMatch)
+
+    init {
+        val cs = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            weightx = 1.0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(4, 4, 4, 4)
+        }
+
+        add(negationBox, cs)
+
+        prefixField.addWidgets("Starts with:", cs, this)
+        prefixField.addChangeListener { notifyChanged() }
+        postfixField.addWidgets("Ends with:", cs, this)
+        postfixField.addChangeListener { notifyChanged() }
+        regexWidget = RegExpWidget(Piper.RegularExpression.getDefaultInstance(), this, cs)
+        regexWidget.addChangeListener { notifyChanged() }
+
+        headerEditor?.let {
+            cs.gridy++
+            add(it, cs)
+            it.addChangeListener { notifyChanged() }
+        }
+
+        cs.gridy++
+        add(commandEditor, cs)
+
+        inScopeCheck?.let { check ->
+            cs.gridy++
+            add(check, cs)
+        }
+
+        cs.gridy++
+        cs.fill = GridBagConstraints.BOTH
+        cs.weighty = 1.0
+        val lists = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
+        lists.leftComponent = andPanel
+        lists.rightComponent = orPanel
+        lists.resizeWeight = 0.5
+        add(lists, cs)
+
+        negationBox.addActionListener { notifyChanged() }
+        commandEditor.addChangeListener { notifyChanged() }
+        inScopeCheck?.addActionListener { notifyChanged() }
+        andPanel.addChangeListener { notifyChanged() }
+        orPanel.addChangeListener { notifyChanged() }
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        changeListeners += listener
+    }
+
+    fun display(value: Piper.MessageMatch) {
+        withSuppressedChanges {
+            negationBox.selectedItem = if (value.negation) MatchNegation.NEGATED else MatchNegation.NORMAL
+            prefixField.setValue(value.prefix)
+            postfixField.setValue(value.postfix)
+            if (value.hasRegex()) {
+                regexWidget.setValue(value.regex)
+            } else {
+                regexWidget.setValue(Piper.RegularExpression.getDefaultInstance())
+            }
+            headerEditor?.display(value.header)
+            if (value.hasCmd()) {
+                commandEditor.display(value.cmd)
+            } else {
+                commandEditor.display(Piper.CommandInvocation.getDefaultInstance())
+            }
+            inScopeCheck?.isSelected = value.inScope
+            andPanel.setItems(value.andAlsoList)
+            orPanel.setItems(value.orElseList)
+        }
+    }
+
+    fun snapshot(): Piper.MessageMatch {
+        val builder = Piper.MessageMatch.newBuilder()
+        if ((negationBox.selectedItem as? MatchNegation)?.negation == true) {
+            builder.negation = true
+        }
+        builder.prefix = prefixField.getByteString()
+        builder.postfix = postfixField.getByteString()
+        if (regexWidget.hasPattern()) {
+            builder.regex = regexWidget.toRegularExpression()
+        }
+        headerEditor?.toHeaderMatch()?.let { builder.header = it }
+        val command = runCatching { commandEditor.snapshot() }.getOrElse { error ->
+            val message = error.message.orEmpty()
+            if (message.contains("at least one token", ignoreCase = true)) {
+                Piper.CommandInvocation.getDefaultInstance()
+            } else {
+                throw RuntimeException(message.ifEmpty { "Invalid command configuration" }, error)
+            }
+        }
+        if (command != Piper.CommandInvocation.getDefaultInstance()) {
+            builder.cmd = command
+        }
+        if (inScopeCheck?.isSelected == true) {
+            builder.inScope = true
+        }
+        builder.addAllAndAlso(andPanel.items())
+        builder.addAllOrElse(orPanel.items())
+        return builder.build()
+    }
+
+    fun setFormEnabled(enabled: Boolean) {
+        fun Component.setEnabledRecursively(value: Boolean) {
+            isEnabled = value
+            if (this is Container) {
+                components.forEach { it.setEnabledRecursively(value) }
+            }
+        }
+        this.setEnabledRecursively(enabled)
+    }
+
+    private fun notifyChanged() {
+        if (suppressNotifications) return
+        changeListeners.forEach { it.invoke() }
+    }
+
+    private inline fun withSuppressedChanges(block: () -> Unit) {
+        suppressNotifications = true
+        try {
+            block()
+        } finally {
+            suppressNotifications = false
+        }
+    }
+}
+
+private class HeaderMatchEditorPanel(parent: Component?) : JPanel(GridBagLayout()) {
+    private val headerField: JComboBox<String>
+    private val regexWidget: RegExpWidget
+    private val listeners = mutableListOf<() -> Unit>()
+
+    init {
+        border = BorderFactory.createTitledBorder("Header match")
+        val cs = GridBagConstraints().apply {
+            gridx = 0
+            gridy = 0
+            weightx = 1.0
+            insets = Insets(4, 4, 4, 4)
+            fill = GridBagConstraints.HORIZONTAL
+        }
+        headerField = createLabeledComboBox(
+            "Header name (case insensitive)",
+            "",
+            this,
+            cs,
+            arrayOf(
+                "Content-Disposition",
+                "Content-Type",
+                "Cookie",
+                "Host",
+                "Origin",
+                "Referer",
+                "Server",
+                "User-Agent",
+                "X-Requested-With",
+            ),
+        )
+        regexWidget = RegExpWidget(Piper.RegularExpression.getDefaultInstance(), this, cs)
+        regexWidget.addChangeListener { notifyListeners() }
+        headerField.addActionListener { notifyListeners() }
+        (headerField.editor.editorComponent as? JTextComponent)?.document?.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent?) = notifyListeners()
+            override fun removeUpdate(e: DocumentEvent?) = notifyListeners()
+            override fun changedUpdate(e: DocumentEvent?) = notifyListeners()
+        })
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        listeners += listener
+    }
+
+    fun display(value: Piper.HeaderMatch) {
+        if (value == Piper.HeaderMatch.getDefaultInstance()) {
+            headerField.selectedItem = ""
+            regexWidget.setValue(Piper.RegularExpression.getDefaultInstance())
+        } else {
+            headerField.selectedItem = value.header
+            regexWidget.setValue(value.regex)
+        }
+    }
+
+    fun toHeaderMatch(): Piper.HeaderMatch? {
+        val text = headerField.selectedItem?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) {
+            return null
+        }
+        val regex = if (regexWidget.hasPattern()) regexWidget.toRegularExpression() else null
+        return Piper.HeaderMatch.newBuilder().apply {
+            header = text
+            if (regex != null) {
+                this.regex = regex
+            }
+        }.build()
+    }
+
+    private fun notifyListeners() {
+        listeners.forEach { it.invoke() }
+    }
+}
+
+private class MessageMatchListPanel(
+    private val parent: Component?,
+    caption: String,
+    private val showHeaderMatch: Boolean,
+) : JPanel(BorderLayout()) {
+
+    private val model = DefaultListModel<Piper.MessageMatch>()
+    private val list = JList(model)
+    private val listeners = mutableListOf<() -> Unit>()
+
+    init {
+        border = BorderFactory.createTitledBorder(caption)
+        list.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        val scroll = JScrollPane(list)
+        add(scroll, BorderLayout.CENTER)
+
+        val toolbar = JPanel()
+        toolbar.layout = BoxLayout(toolbar, BoxLayout.X_AXIS)
+        val addButton = JButton("Add")
+        val editButton = JButton("Edit")
+        val removeButton = JButton("Remove")
+
+        addButton.addActionListener {
+            val created = MessageMatchDialog(
+                Piper.MessageMatch.getDefaultInstance(),
+                showHeaderMatch,
+                parent ?: this,
+            ).showGUI() ?: return@addActionListener
+            model.addElement(created)
+            notifyChanged()
+        }
+
+        editButton.addActionListener {
+            val selectedIndex = list.selectedIndex
+            if (selectedIndex >= 0) {
+                val current = model.getElementAt(selectedIndex)
+                val edited = MessageMatchDialog(current, showHeaderMatch, parent ?: this).showGUI()
+                if (edited != null) {
+                    model.set(selectedIndex, edited)
+                    notifyChanged()
+                }
+            }
+        }
+
+        removeButton.addActionListener {
+            val index = list.selectedIndex
+            if (index >= 0) {
+                model.remove(index)
+                notifyChanged()
+            }
+        }
+
+        list.addListSelectionListener {
+            val hasSelection = list.selectedIndex >= 0
+            editButton.isEnabled = hasSelection
+            removeButton.isEnabled = hasSelection
+        }
+
+        toolbar.add(addButton)
+        toolbar.add(Box.createRigidArea(Dimension(4, 0)))
+        toolbar.add(editButton)
+        toolbar.add(Box.createRigidArea(Dimension(4, 0)))
+        toolbar.add(removeButton)
+        toolbar.add(Box.createHorizontalGlue())
+        add(toolbar, BorderLayout.SOUTH)
+        editButton.isEnabled = false
+        removeButton.isEnabled = false
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        listeners += listener
+    }
+
+    fun setItems(items: List<Piper.MessageMatch>) {
+        model.removeAllElements()
+        items.forEach(model::addElement)
+    }
+
+    fun items(): List<Piper.MessageMatch> = (0 until model.size()).map(model::getElementAt)
+
+    private fun notifyChanged() {
+        listeners.forEach { it.invoke() }
+    }
+}
+
 class WorkspaceFilterPanel(
     parent: Component?,
     private val onChange: () -> Unit,
 ) : JPanel(BorderLayout()) {
 
-    private val filterPanel = MessageMatchInlinePanel(parent)
+    private val filterPanel = MessageMatchEditorPanel(parent)
     private val summaryLabel = JLabel("Filter description → (none)")
     private val sampleLabel = JLabel("Matched sample: –")
 
@@ -293,14 +694,14 @@ class WorkspaceFilterPanel(
     }
 
     fun display(filter: Piper.MessageMatch?) {
-        filterPanel.setValue(filter)
+        filterPanel.display(filter)
         updateSummary()
     }
 
-    fun value(): Piper.MessageMatch? = filterPanel.toMessageMatch()
+    fun value(): Piper.MessageMatch? = filterPanel.value()
 
     private fun updateSummary() {
-        val value = filterPanel.toMessageMatch()
+        val value = filterPanel.value()
         summaryLabel.text = "Filter description → " +
             (value?.toHumanReadable(negation = false, hideParentheses = true) ?: "(none)")
         sampleLabel.text = "Matched sample: preview unavailable"
@@ -325,7 +726,16 @@ class WorkspaceCommandPanel(
     private val tagsLabelText: String = "Command tags (comma separated)",
 ) : JPanel(BorderLayout()) {
 
-    private val commandEditor = CommandInvocationEditor(parent, purpose, showDependenciesField = !showDependenciesField)
+    private val commandEditor = CommandInvocationEditor(
+        parent,
+        purpose,
+        config = CommandInvocationEditorConfig(
+            showParametersTab = false,
+            showInputTab = false,
+            showFiltersTab = false,
+            showDependenciesField = false,
+        ),
+    )
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
     private val tagsField = if (showTagsField) JTextField() else null

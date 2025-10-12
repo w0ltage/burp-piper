@@ -206,6 +206,7 @@ private abstract class MinimalToolInlineEditor<T>(
             config.showScope,
             config.showFilter,
         )
+        widget?.setDirtyListener { notifyDirty() }
         widget?.addCommandChangeListener { notifyDirty() }
         addCustomFields(value, formPanel, cs)
         val fillerConstraints = GridBagConstraints().apply {

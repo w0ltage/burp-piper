@@ -460,7 +460,7 @@ private class GeneratorEditorPanel(
     private var state: GeneratorEditorState? = null
     private var loading = false
 
-    private val header = WorkspaceHeaderPanel<TemplateOption>("Template") { markDirty() }
+    private val header = WorkspaceHeaderPanel<TemplateOption>("Template", onChange = { markDirty() })
     private val tabbedPane = JTabbedPane()
     private val overviewTab = WorkspaceOverviewPanel<GeneratorEditorState>(
         title = "Generator summary",

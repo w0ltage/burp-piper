@@ -38,66 +38,90 @@ const val INPUT_FILENAME_TOKEN = "<INPUT>"
 
 private val MONO_FONT = Font("monospaced", Font.PLAIN, 12)
 
+data class CommandInvocationEditorConfig(
+    val showParametersTab: Boolean = true,
+    val showInputTab: Boolean = true,
+    val showFiltersTab: Boolean = true,
+    val showDependenciesField: Boolean = true,
+)
+
 class CommandInvocationEditor(
     parent: Component?,
     private val purpose: CommandInvocationPurpose,
     private val showPassHeaders: Boolean = true,
-    private val showDependenciesField: Boolean = true,
+    private val config: CommandInvocationEditorConfig = CommandInvocationEditorConfig(),
 ) : JPanel(BorderLayout()) {
 
     private val commandPanel = CommandEditorPanel { notifyChanged() }
-    private val parametersPanel = ParameterEditorPanel { notifyChanged() }
-    private val ioPanel = InputMethodPanel(showPassHeaders) { notifyChanged() }
-    private val stdoutPanel = MessageMatchInlinePanel(parent)
-    private val stderrPanel = MessageMatchInlinePanel(parent)
+    private val parametersPanel = if (config.showParametersTab) ParameterEditorPanel { notifyChanged() } else null
+    private val ioPanel = if (config.showInputTab) InputMethodPanel(showPassHeaders) { notifyChanged() } else null
+    private val stdoutPanel = if (config.showFiltersTab && purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        MessageMatchInlinePanel(parent)
+    } else null
+    private val stderrPanel = if (config.showFiltersTab && purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        MessageMatchInlinePanel(parent)
+    } else null
     private val hintLabel = JLabel("Define success conditions using filters or exit codes")
-    private val dependenciesField = if (showDependenciesField) JTextField() else null
+    private val dependenciesField = if (config.showInputTab && config.showDependenciesField) JTextField() else null
     private val changeListeners = mutableListOf<() -> Unit>()
 
     init {
         border = EmptyBorder(8, 8, 8, 8)
-        val tabs = JTabbedPane()
-        tabs.addTab("Command", commandPanel)
-        tabs.addTab("Parameters", parametersPanel)
-        val inputContainer = JPanel()
-        inputContainer.layout = BoxLayout(inputContainer, BoxLayout.Y_AXIS)
-        inputContainer.add(ioPanel)
-        if (dependenciesField != null) {
-            inputContainer.add(Box.createVerticalStrut(12))
-            val label = sectionLabel("Required binaries (comma separated)")
-            inputContainer.add(label)
-            dependenciesField.alignmentX = Component.LEFT_ALIGNMENT
-            dependenciesField.columns = 24
-            dependenciesField.document.addDocumentListener(object : DocumentListener {
-                override fun insertUpdate(e: DocumentEvent?) = notifyChanged()
-                override fun removeUpdate(e: DocumentEvent?) = notifyChanged()
-                override fun changedUpdate(e: DocumentEvent?) = notifyChanged()
-            })
-            inputContainer.add(dependenciesField)
+        if (shouldUseTabbedLayout()) {
+            val tabs = JTabbedPane()
+            tabs.addTab("Command", commandPanel)
+            parametersPanel?.let { tabs.addTab("Parameters", it) }
+            ioPanel?.let { panel ->
+                val inputContainer = JPanel()
+                inputContainer.layout = BoxLayout(inputContainer, BoxLayout.Y_AXIS)
+                inputContainer.add(panel)
+                if (dependenciesField != null) {
+                    inputContainer.add(Box.createVerticalStrut(12))
+                    val label = sectionLabel("Required binaries (comma separated)")
+                    inputContainer.add(label)
+                    dependenciesField.alignmentX = Component.LEFT_ALIGNMENT
+                    dependenciesField.columns = 24
+                    dependenciesField.document.addDocumentListener(documentChangeListener())
+                    inputContainer.add(dependenciesField)
+                }
+                tabs.addTab("Input / Method", JScrollPane(inputContainer))
+            }
+            if (stdoutPanel != null && stderrPanel != null) {
+                val filters = JPanel()
+                filters.layout = BoxLayout(filters, BoxLayout.Y_AXIS)
+                filters.border = EmptyBorder(8, 8, 8, 8)
+                filters.add(sectionLabel("Match on stdout"))
+                filters.add(stdoutPanel)
+                filters.add(Box.createVerticalStrut(12))
+                filters.add(sectionLabel("Match on stderr"))
+                filters.add(stderrPanel)
+                filters.add(Box.createVerticalStrut(12))
+                hintLabel.alignmentX = Component.LEFT_ALIGNMENT
+                filters.add(hintLabel)
+                stdoutPanel.addChangeListener { notifyChanged() }
+                stderrPanel.addChangeListener { notifyChanged() }
+                tabs.addTab("Filters", JScrollPane(filters))
+            }
+            add(tabs, BorderLayout.CENTER)
+        } else {
+            val container = JPanel(BorderLayout())
+            container.add(commandPanel, BorderLayout.CENTER)
+            add(container, BorderLayout.CENTER)
         }
-        tabs.addTab("Input / Method", JScrollPane(inputContainer))
-        if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
-            val filters = JPanel()
-            filters.layout = BoxLayout(filters, BoxLayout.Y_AXIS)
-            filters.border = EmptyBorder(8, 8, 8, 8)
-            filters.add(sectionLabel("Match on stdout"))
-            filters.add(stdoutPanel)
-            filters.add(Box.createVerticalStrut(12))
-            filters.add(sectionLabel("Match on stderr"))
-            filters.add(stderrPanel)
-            filters.add(Box.createVerticalStrut(12))
-            hintLabel.alignmentX = Component.LEFT_ALIGNMENT
-            filters.add(hintLabel)
-            stdoutPanel.addChangeListener { notifyChanged() }
-            stderrPanel.addChangeListener { notifyChanged() }
-            tabs.addTab("Filters", JScrollPane(filters))
-        }
-        add(tabs, BorderLayout.CENTER)
     }
 
     private fun sectionLabel(text: String): JComponent = JLabel(text).apply {
         font = font.deriveFont(Font.BOLD)
         alignmentX = Component.LEFT_ALIGNMENT
+    }
+
+    private fun shouldUseTabbedLayout(): Boolean =
+        config.showParametersTab || config.showInputTab || (config.showFiltersTab && purpose != CommandInvocationPurpose.EXECUTE_ONLY)
+
+    private fun documentChangeListener(): DocumentListener = object : DocumentListener {
+        override fun insertUpdate(e: DocumentEvent?) = notifyChanged()
+        override fun removeUpdate(e: DocumentEvent?) = notifyChanged()
+        override fun changedUpdate(e: DocumentEvent?) = notifyChanged()
     }
 
     fun addChangeListener(listener: () -> Unit) {
@@ -106,10 +130,10 @@ class CommandInvocationEditor(
 
     fun display(command: Piper.CommandInvocation) {
         commandPanel.setTokens(command.buildTokenList())
-        parametersPanel.setParameters(command.parameterList.map { it.toParameterState() })
-        ioPanel.setInputMethod(command.inputMethod, command.exitCodeList, command.passHeaders)
+        parametersPanel?.setParameters(command.parameterList.map { it.toParameterState() })
+        ioPanel?.setInputMethod(command.inputMethod, command.exitCodeList, command.passHeaders)
         dependenciesField?.text = command.requiredInPathList.joinToString(", ")
-        if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        if (stdoutPanel != null && stderrPanel != null) {
             stdoutPanel.setValue(command.stdout)
             stderrPanel.setValue(command.stderr)
         }
@@ -119,18 +143,26 @@ class CommandInvocationEditor(
         val tokens = commandPanel.tokens()
         require(tokens.isNotEmpty()) { "The command must contain at least one token" }
         require(tokens.first().isNotBlank()) { "The first token (command) cannot be blank" }
-        val parameters = parametersPanel.parameters
+        val parameters = parametersPanel?.parameters ?: emptyList()
         val duplicateNames = parameters.groupingBy { it.name }.eachCount().filterValues { it > 1 }
         if (duplicateNames.isNotEmpty()) {
             throw IllegalStateException("Parameter names must be unique: ${duplicateNames.keys.joinToString(", ")}")
         }
-        val ioSnapshot = ioPanel.snapshot()
+        val ioSnapshot = ioPanel?.snapshot()
         val builder = Piper.CommandInvocation.newBuilder()
-            .setInputMethod(ioSnapshot.method)
-            .setPassHeaders(ioSnapshot.passHeaders)
-            .addAllPrefix(tokens.prefixTokens(ioSnapshot.method))
-            .addAllPostfix(tokens.postfixTokens(ioSnapshot.method))
-            .addAllExitCode(ioSnapshot.exitCodes)
+        if (ioSnapshot != null) {
+            builder.setInputMethod(ioSnapshot.method)
+                .setPassHeaders(ioSnapshot.passHeaders)
+                .addAllPrefix(tokens.prefixTokens(ioSnapshot.method))
+                .addAllPostfix(tokens.postfixTokens(ioSnapshot.method))
+                .addAllExitCode(ioSnapshot.exitCodes)
+        } else {
+            val defaultMethod = Piper.CommandInvocation.InputMethod.STDIN
+            builder.setInputMethod(defaultMethod)
+                .setPassHeaders(false)
+                .addAllPrefix(tokens.prefixTokens(defaultMethod))
+                .addAllPostfix(tokens.postfixTokens(defaultMethod))
+        }
             .addAllParameter(parameters.map { it.toProtoParameter() })
         if (dependenciesField != null) {
             val dependencies = dependenciesField.text.split(',').mapNotNull {
@@ -138,7 +170,7 @@ class CommandInvocationEditor(
             }
             builder.addAllRequiredInPath(dependencies)
         }
-        if (purpose != CommandInvocationPurpose.EXECUTE_ONLY) {
+        if (stdoutPanel != null && stderrPanel != null) {
             stdoutPanel.toMessageMatch()?.let { builder.stdout = it }
             stderrPanel.toMessageMatch()?.let { builder.stderr = it }
             if (builder.exitCodeCount == 0 && !builder.hasStdout() && !builder.hasStderr()) {
