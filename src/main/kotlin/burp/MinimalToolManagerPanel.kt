@@ -8,6 +8,7 @@ import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Container
+import java.awt.FlowLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
@@ -22,7 +23,6 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.AbstractAction
 import javax.swing.AbstractButton
-import javax.swing.BorderFactory
 import javax.swing.DefaultListCellRenderer
 import javax.swing.DefaultListModel
 import javax.swing.JButton
@@ -186,6 +186,7 @@ private abstract class MinimalToolInlineEditor<T>(
         formPanel.removeAll()
         val cs = GridBagConstraints().apply {
             fill = GridBagConstraints.HORIZONTAL
+            anchor = GridBagConstraints.FIRST_LINE_START
             weightx = 1.0
             gridx = 0
             gridy = 0
@@ -202,6 +203,15 @@ private abstract class MinimalToolInlineEditor<T>(
             config.showFilter,
         )
         addCustomFields(value, formPanel, cs)
+        val fillerConstraints = GridBagConstraints().apply {
+            gridx = 0
+            gridy = cs.gridy + 1
+            gridwidth = 4
+            weightx = 1.0
+            weighty = 1.0
+            fill = GridBagConstraints.BOTH
+        }
+        formPanel.add(JPanel().apply { isOpaque = false }, fillerConstraints)
         attachDirtyListeners(formPanel)
         (cards.layout as CardLayout).show(cards, "form")
         revalidate()
@@ -266,6 +276,7 @@ private class MinimalToolManagerPanel<T>(
     parent: Component?,
     private val extractor: (T) -> Piper.MinimalTool,
     editorFactory: (Component?) -> ToolEditor<T>,
+    private val newButtonLabel: String,
     private val defaultFactory: () -> T,
     private val cloneFactory: (T) -> T,
     private val toggleFactory: (T) -> T,
@@ -279,18 +290,12 @@ private class MinimalToolManagerPanel<T>(
     private val editor = editorFactory(parent)
     private val saveButton = JButton("Save")
     private val cancelButton = JButton("Cancel")
-    private val newButton = JButton("+ New")
-    private val deleteButton = JButton("Delete")
-    private val copyButton = JButton("Copy")
-    private val pasteButton = JButton("Paste")
-    private val cloneButton = JButton("Clone")
-    private val toggleButton = JButton(TOGGLE_DEFAULT)
+    private val newButton = JButton(newButtonLabel)
 
     private var currentIndex: Int? = null
     private var dirty = false
 
     init {
-        border = EmptyBorder(8, 8, 8, 8)
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
         list.cellRenderer = MinimalToolListCellRenderer(extractor)
         list.addListSelectionListener(ListSelectionListener { event ->
@@ -315,18 +320,25 @@ private class MinimalToolManagerPanel<T>(
         searchField.toolTipText = "Search by name or tag"
         searchField.document.addDocumentListener(SimpleDocumentCallback { applyFilter() })
 
-        val leftPanel = JPanel(BorderLayout())
+        val leftPanel = JPanel(BorderLayout()).apply {
+            border = EmptyBorder(8, 8, 8, 8)
+        }
         val searchPanel = JPanel(BorderLayout(4, 4))
         searchPanel.add(JLabel("Search"), BorderLayout.WEST)
         searchPanel.add(searchField, BorderLayout.CENTER)
         leftPanel.add(searchPanel, BorderLayout.NORTH)
         leftPanel.add(JScrollPane(list), BorderLayout.CENTER)
-        leftPanel.add(createLeftFooter(), BorderLayout.SOUTH)
+        val newButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            border = EmptyBorder(12, 0, 0, 0)
+            add(newButton.apply { addActionListener { createNew() } })
+        }
+        leftPanel.add(newButtonPanel, BorderLayout.SOUTH)
 
-        val rightPanel = JPanel(BorderLayout())
-        rightPanel.border = BorderFactory.createEmptyBorder(0, 12, 0, 0)
-        rightPanel.add(editor.component, BorderLayout.CENTER)
-        rightPanel.add(createEditorFooter(), BorderLayout.SOUTH)
+        val rightPanel = JPanel(BorderLayout()).apply {
+            border = EmptyBorder(8, 12, 8, 8)
+            add(editor.component, BorderLayout.CENTER)
+            add(createEditorFooter(), BorderLayout.SOUTH)
+        }
 
         val split = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftPanel, rightPanel)
         split.dividerLocation = 280
@@ -335,22 +347,10 @@ private class MinimalToolManagerPanel<T>(
         if (model.size() > 0) {
             list.selectedIndex = 0
         }
-        updateButtons()
-    }
-
-    private fun createLeftFooter(): Component {
-        val footer = JPanel()
-        footer.add(newButton.apply { addActionListener { createNew() } })
-        footer.add(deleteButton.apply { addActionListener { deleteSelected() } })
-        footer.add(cloneButton.apply { addActionListener { cloneSelected() } })
-        footer.add(toggleButton.apply { addActionListener { toggleSelected() } })
-        footer.add(copyButton.apply { addActionListener { copySelected() } })
-        footer.add(pasteButton.apply { addActionListener { pasteFromClipboard() } })
-        return footer
     }
 
     private fun createEditorFooter(): Component {
-        val footer = JPanel()
+        val footer = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0))
         footer.add(saveButton.apply {
             isEnabled = false
             addActionListener { save() }
@@ -403,7 +403,6 @@ private class MinimalToolManagerPanel<T>(
         } else if (list.selectedIndex < 0) {
             list.selectedIndex = 0
         }
-        updateButtons()
     }
 
     private fun loadSelection() {
@@ -414,7 +413,6 @@ private class MinimalToolManagerPanel<T>(
             dirty = false
             saveButton.isEnabled = false
             cancelButton.isEnabled = false
-            updateButtons()
             return
         }
         val backingIndex = filterModel.backingIndex(filteredIndex)
@@ -424,7 +422,6 @@ private class MinimalToolManagerPanel<T>(
         dirty = false
         saveButton.isEnabled = false
         cancelButton.isEnabled = false
-        updateButtons()
     }
 
     private fun createNew() {
@@ -434,7 +431,6 @@ private class MinimalToolManagerPanel<T>(
         dirty = true
         saveButton.isEnabled = true
         cancelButton.isEnabled = true
-        updateButtons()
     }
 
     private fun deleteSelected() {
@@ -450,7 +446,6 @@ private class MinimalToolManagerPanel<T>(
         } else {
             list.clearSelection()
         }
-        updateButtons()
     }
 
     private fun cloneSelected() {
@@ -466,7 +461,6 @@ private class MinimalToolManagerPanel<T>(
         if (filtered >= 0) {
             list.selectedIndex = filtered
         }
-        updateButtons()
     }
 
     private fun toggleSelected() {
@@ -482,7 +476,6 @@ private class MinimalToolManagerPanel<T>(
         dirty = false
         saveButton.isEnabled = false
         cancelButton.isEnabled = false
-        updateButtons()
     }
 
     private fun copySelected() {
@@ -512,7 +505,6 @@ private class MinimalToolManagerPanel<T>(
         } catch (e: Exception) {
             JOptionPane.showMessageDialog(this, e.message)
         }
-        updateButtons()
     }
 
     private fun save() {
@@ -537,7 +529,6 @@ private class MinimalToolManagerPanel<T>(
         dirty = false
         saveButton.isEnabled = false
         cancelButton.isEnabled = false
-        updateButtons()
     }
 
     private fun cancel() {
@@ -550,27 +541,12 @@ private class MinimalToolManagerPanel<T>(
         dirty = false
         saveButton.isEnabled = false
         cancelButton.isEnabled = false
-        updateButtons()
     }
 
     private fun markDirty() {
         dirty = true
         saveButton.isEnabled = true
         cancelButton.isEnabled = true
-        updateButtons()
-    }
-
-    private fun updateButtons() {
-        val hasSelection = list.selectedIndex >= 0
-        deleteButton.isEnabled = hasSelection
-        cloneButton.isEnabled = hasSelection
-        toggleButton.isEnabled = hasSelection
-        copyButton.isEnabled = hasSelection
-        toggleButton.text = when {
-            !hasSelection -> TOGGLE_DEFAULT
-            extractor(filterModel.getElementAt(list.selectedIndex)).enabled -> "Disable"
-            else -> "Enable"
-        }
     }
 
     override fun lostOwnership(clipboard: java.awt.datatransfer.Clipboard?, contents: Transferable?) {}
@@ -587,6 +563,7 @@ fun createMessageViewerManager(
         parent,
         extractor = { it.common },
         editorFactory = { MessageViewerInlineEditor(it, commentatorModel, switchToCommentator) },
+        newButtonLabel = "+ New message viewer",
         defaultFactory = { Piper.MessageViewer.getDefaultInstance() },
         cloneFactory = { it },
         toggleFactory = { it.buildEnabled(!it.common.enabled) },
@@ -811,6 +788,7 @@ fun createMenuItemManager(
         parent,
         extractor = { it.common },
         editorFactory = { MenuItemInlineEditor(it) },
+        newButtonLabel = "+ New context menu item",
         defaultFactory = { Piper.UserActionTool.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.common.enabled) },
@@ -828,6 +806,7 @@ fun createMacroManager(
         parent,
         extractor = { it },
         editorFactory = { BasicMinimalToolEditor(it, MinimalToolEditorConfig()) },
+        newButtonLabel = "+ New macro",
         defaultFactory = { Piper.MinimalTool.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.enabled) },
@@ -845,6 +824,7 @@ fun createHttpListenerManager(
         parent,
         extractor = { it.common },
         editorFactory = { HttpListenerInlineEditor(it) },
+        newButtonLabel = "+ New HTTP listener",
         defaultFactory = { Piper.HttpListener.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.common.enabled) },
@@ -862,6 +842,7 @@ fun createCommentatorManager(
         parent,
         extractor = { it.common },
         editorFactory = { CommentatorInlineEditor(it) },
+        newButtonLabel = "+ New commentator",
         defaultFactory = { Piper.Commentator.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.common.enabled) },
@@ -879,6 +860,7 @@ fun createIntruderPayloadProcessorManager(
         parent,
         extractor = { it },
         editorFactory = { BasicMinimalToolEditor(it, MinimalToolEditorConfig(showPassHeaders = false)) },
+        newButtonLabel = "+ New payload processor",
         defaultFactory = { Piper.MinimalTool.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.enabled) },
@@ -896,6 +878,7 @@ fun createHighlighterManager(
         parent,
         extractor = { it.common },
         editorFactory = { HighlighterInlineEditor(it) },
+        newButtonLabel = "+ New highlighter",
         defaultFactory = { Piper.Highlighter.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
         toggleFactory = { it.buildEnabled(!it.common.enabled) },

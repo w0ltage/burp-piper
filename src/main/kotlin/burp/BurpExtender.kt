@@ -395,7 +395,7 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
 
     private fun populateTabs(cfg: ConfigModel, parent: Component?) {
         tabs.removeAll()
-        populatePiperTabs(tabs, cfg, parent) { queue }
+        populatePiperTabs(tabs, cfg, parent)
     }
 
     // ITab members
