@@ -219,42 +219,17 @@ class MontoyaExtension : BurpExtension {
 
         override fun contentsChanged(e: ListDataEvent) {
             if (!initialized) return
-            if (!isIndexRangeValid(e)) {
-                refreshRegistrations()
-                afterModelChange()
-                return
-            }
-            for (index in e.index0..e.index1) {
-                registrations.getOrNull(index)?.let { deregisterItem(it) }
-                registrations[index] = registerItem(model[index])
-            }
-            afterModelChange()
+            refreshAll()
         }
 
         override fun intervalAdded(e: ListDataEvent) {
             if (!initialized) return
-            if (!isIndexRangeValid(e)) {
-                refreshRegistrations()
-                afterModelChange()
-                return
-            }
-            for (index in e.index0..e.index1) {
-                registrations.add(index, registerItem(model[index]))
-            }
-            afterModelChange()
+            refreshAll()
         }
 
         override fun intervalRemoved(e: ListDataEvent) {
             if (!initialized) return
-            if (!isIndexRangeValid(e)) {
-                refreshRegistrations()
-                afterModelChange()
-                return
-            }
-            for (index in e.index1 downTo e.index0) {
-                registrations.removeAt(index)?.let { deregisterItem(it) }
-            }
-            afterModelChange()
+            refreshAll()
         }
 
         private fun refreshRegistrations() {
@@ -267,10 +242,9 @@ class MontoyaExtension : BurpExtension {
             }
         }
 
-        private fun isIndexRangeValid(event: ListDataEvent): Boolean {
-            val start = event.index0
-            val end = event.index1
-            return start >= 0 && end >= start
+        private fun refreshAll() {
+            refreshRegistrations()
+            afterModelChange()
         }
     }
 
