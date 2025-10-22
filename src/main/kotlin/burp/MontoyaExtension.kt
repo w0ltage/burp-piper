@@ -194,17 +194,86 @@ class MontoyaExtension : BurpExtension {
         }
     }
 
-    private inner class MontoyaMessageViewerManager(
-        private val model: DefaultListModel<Piper.MessageViewer>,
+    private abstract inner class ListModelRegistrationManager<T, R>(
+        private val model: DefaultListModel<T>,
     ) : ListDataListener {
 
-        private val registrations: MutableList<ViewerRegistrations?> = mutableListOf()
+        private val registrations: MutableList<R?> = mutableListOf()
 
         init {
-            for (index in 0 until model.size()) {
-                registrations.add(registerViewer(model[index]))
-            }
+            refreshRegistrations()
             model.addListDataListener(this)
+        }
+
+        protected abstract fun registerItem(item: T): R?
+        protected abstract fun deregisterItem(registration: R)
+
+        protected open fun afterModelChange() {
+            saveConfig()
+        }
+
+        override fun contentsChanged(e: ListDataEvent) {
+            if (!isIndexRangeValid(e)) {
+                refreshRegistrations()
+                afterModelChange()
+                return
+            }
+            for (index in e.index0..e.index1) {
+                registrations.getOrNull(index)?.let { deregisterItem(it) }
+                registrations[index] = registerItem(model[index])
+            }
+            afterModelChange()
+        }
+
+        override fun intervalAdded(e: ListDataEvent) {
+            if (!isIndexRangeValid(e)) {
+                refreshRegistrations()
+                afterModelChange()
+                return
+            }
+            for (index in e.index0..e.index1) {
+                registrations.add(index, registerItem(model[index]))
+            }
+            afterModelChange()
+        }
+
+        override fun intervalRemoved(e: ListDataEvent) {
+            if (!isIndexRangeValid(e)) {
+                refreshRegistrations()
+                afterModelChange()
+                return
+            }
+            for (index in e.index1 downTo e.index0) {
+                registrations.removeAt(index)?.let { deregisterItem(it) }
+            }
+            afterModelChange()
+        }
+
+        private fun refreshRegistrations() {
+            registrations.forEach { registration ->
+                registration?.let { deregisterItem(it) }
+            }
+            registrations.clear()
+            for (index in 0 until model.size()) {
+                registrations.add(registerItem(model[index]))
+            }
+        }
+
+        private fun isIndexRangeValid(event: ListDataEvent): Boolean {
+            val start = event.index0
+            val end = event.index1
+            return start >= 0 && end >= start
+        }
+    }
+
+    private inner class MontoyaMessageViewerManager(
+        model: DefaultListModel<Piper.MessageViewer>,
+    ) : ListModelRegistrationManager<Piper.MessageViewer, ViewerRegistrations>(model) {
+
+        override fun registerItem(item: Piper.MessageViewer): ViewerRegistrations? = registerViewer(item)
+
+        override fun deregisterItem(registration: ViewerRegistrations) {
+            registration.deregister()
         }
 
         private fun registerViewer(viewer: Piper.MessageViewer): ViewerRegistrations? {
@@ -228,28 +297,6 @@ class MontoyaExtension : BurpExtension {
                 null
             }
             return ViewerRegistrations(enabledFlag, requestRegistration, responseRegistration)
-        }
-
-        override fun contentsChanged(e: ListDataEvent) {
-            for (index in e.index0..e.index1) {
-                registrations.getOrNull(index)?.deregister()
-                registrations[index] = registerViewer(model[index])
-            }
-            saveConfig()
-        }
-
-        override fun intervalAdded(e: ListDataEvent) {
-            for (index in e.index0..e.index1) {
-                registrations.add(index, registerViewer(model[index]))
-            }
-            saveConfig()
-        }
-
-        override fun intervalRemoved(e: ListDataEvent) {
-            for (index in e.index1 downTo e.index0) {
-                registrations.removeAt(index)?.deregister()
-            }
-            saveConfig()
         }
     }
 
@@ -285,7 +332,7 @@ class MontoyaExtension : BurpExtension {
         override fun selectedData(): Selection? {
             val bytes = selectedBytes() ?: return null
             if (bytes.isEmpty()) return null
-            return Selection.selection(montoyaBytes(bytes))
+            return Selection.selection(this@MontoyaExtension.montoyaBytes(bytes))
         }
 
         override fun isEnabledFor(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Boolean {
@@ -334,9 +381,6 @@ class MontoyaExtension : BurpExtension {
         }
 
         protected fun currentMessage(): burp.api.montoya.http.message.HttpRequestResponse? = current
-
-        protected fun montoyaBytes(bytes: kotlin.ByteArray): ByteArray =
-            ByteArray.byteArray(*bytes.map { it.toInt() }.toIntArray())
 
         protected fun logError(message: String) {
             api.logging().logToError(message)
@@ -448,7 +492,7 @@ class MontoyaExtension : BurpExtension {
             parseUrl(requestResponse.url())
 
         override fun processOutput(process: Process) {
-            terminal.text = ""
+            clearTerminal()
             val readers = listOf(process.inputStream.bufferedReader(), process.errorStream.bufferedReader())
             val latch = CountDownLatch(readers.size)
             readers.forEach { reader ->
@@ -456,7 +500,7 @@ class MontoyaExtension : BurpExtension {
                     try {
                         while (true) {
                             val line = reader.readLine() ?: break
-                            SwingUtilities.invokeLater { terminal.append("$line\n") }
+                            appendLine(line)
                         }
                     } finally {
                         latch.countDown()
@@ -469,18 +513,30 @@ class MontoyaExtension : BurpExtension {
 
         override fun handleExecutionFailure(e: IOException) {
             val message = "Failed to execute ${viewer.common.cmd.commandLine}: ${e.message}"
-            SwingUtilities.invokeLater {
-                terminal.text = ""
-                terminal.append("$message\n")
-            }
+            showSingleLine(message)
             logError(message)
         }
 
         override fun resetUi() {
-            SwingUtilities.invokeLater { terminal.text = "" }
+            clearTerminal()
         }
 
         override fun selectedBytes(): kotlin.ByteArray? = terminal.selectedText?.toByteArray()
+
+        private fun clearTerminal() {
+            SwingUtilities.invokeLater { terminal.text = "" }
+        }
+
+        private fun appendLine(line: String) {
+            SwingUtilities.invokeLater { terminal.append("$line\n") }
+        }
+
+        private fun showSingleLine(line: String) {
+            SwingUtilities.invokeLater {
+                terminal.text = ""
+                terminal.append("$line\n")
+            }
+        }
     }
 
     private inner class PiperPayloadGenerator(
@@ -523,42 +579,16 @@ class MontoyaExtension : BurpExtension {
     }
 
     private inner class MontoyaRegisteredToolManager<M>(
-        private val model: DefaultListModel<M>,
+        model: DefaultListModel<M>,
         private val enabledPredicate: (M) -> Boolean,
         private val register: (M) -> Registration?
-    ) : ListDataListener {
-        private val registrations: MutableList<Registration?> = mutableListOf()
+    ) : ListModelRegistrationManager<M, Registration>(model) {
 
-        init {
-            for (i in 0 until model.size()) {
-                registrations.add(registerIfEnabled(model[i]))
-            }
-            model.addListDataListener(this)
-        }
-
-        private fun registerIfEnabled(item: M): Registration? =
+        override fun registerItem(item: M): Registration? =
             if (enabledPredicate(item)) register(item) else null
 
-        override fun contentsChanged(e: ListDataEvent) {
-            for (index in e.index0..e.index1) {
-                registrations[index]?.deregister()
-                registrations[index] = registerIfEnabled(model[index])
-            }
-            saveConfig()
-        }
-
-        override fun intervalAdded(e: ListDataEvent) {
-            for (index in e.index0..e.index1) {
-                registrations.add(index, registerIfEnabled(model[index]))
-            }
-            saveConfig()
-        }
-
-        override fun intervalRemoved(e: ListDataEvent) {
-            for (index in e.index1 downTo e.index0) {
-                registrations.removeAt(index)?.deregister()
-            }
-            saveConfig()
+        override fun deregisterItem(registration: Registration) {
+            registration.deregister()
         }
     }
 
