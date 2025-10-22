@@ -199,10 +199,18 @@ class MontoyaExtension : BurpExtension {
     ) : ListDataListener {
 
         private val registrations: MutableList<R?> = mutableListOf()
+        private var initialized = false
 
         init {
-            refreshRegistrations()
             model.addListDataListener(this)
+        }
+
+        protected fun initialize() {
+            if (initialized) {
+                return
+            }
+            initialized = true
+            refreshRegistrations()
         }
 
         protected abstract fun registerItem(item: T): R?
@@ -269,6 +277,10 @@ class MontoyaExtension : BurpExtension {
     private inner class MontoyaMessageViewerManager(
         model: DefaultListModel<Piper.MessageViewer>,
     ) : ListModelRegistrationManager<Piper.MessageViewer, ViewerRegistrations>(model) {
+
+        init {
+            initialize()
+        }
 
         override fun registerItem(item: Piper.MessageViewer): ViewerRegistrations? = registerViewer(item)
 
@@ -583,6 +595,10 @@ class MontoyaExtension : BurpExtension {
         private val enabledPredicate: (M) -> Boolean,
         private val register: (M) -> Registration?
     ) : ListModelRegistrationManager<M, Registration>(model) {
+
+        init {
+            initialize()
+        }
 
         override fun registerItem(item: M): Registration? =
             if (enabledPredicate(item)) register(item) else null
