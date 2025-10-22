@@ -22,6 +22,7 @@ import burp.api.montoya.ui.editor.extension.HttpRequestEditorProvider
 import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
 import burp.api.montoya.utilities.ByteUtils
 import java.awt.Component
+import java.awt.GraphicsEnvironment
 import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
@@ -104,9 +105,13 @@ class MontoyaExtension : BurpExtension {
         messageViewerManager = MontoyaMessageViewerManager(configModel.messageViewersModel)
 
         suiteTabs = JTabbedPane()
-        populatePiperTabs(suiteTabs, configModel, parent = null)
-        suiteTabRegistration = api.userInterface().registerSuiteTab(NAME, suiteTabs)
-        api.logging().logToOutput("Piper suite tab registered")
+        if (!GraphicsEnvironment.isHeadless()) {
+            populatePiperTabs(suiteTabs, configModel, parent = null)
+            suiteTabRegistration = api.userInterface().registerSuiteTab(NAME, suiteTabs)
+            api.logging().logToOutput("Piper suite tab registered")
+        } else {
+            api.logging().logToOutput("Piper running in headless mode; suite tab not registered")
+        }
 
         configModel.addPropertyChangeListener { saveConfig() }
     }
