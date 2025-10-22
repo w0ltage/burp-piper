@@ -201,16 +201,13 @@ class MontoyaExtension : BurpExtension {
         private val registrations: MutableList<R?> = mutableListOf()
         private var initialized = false
 
-        init {
-            model.addListDataListener(this)
-        }
-
         protected fun initialize() {
             if (initialized) {
                 return
             }
             initialized = true
             refreshRegistrations()
+            model.addListDataListener(this)
         }
 
         protected abstract fun registerItem(item: T): R?
@@ -221,6 +218,7 @@ class MontoyaExtension : BurpExtension {
         }
 
         override fun contentsChanged(e: ListDataEvent) {
+            if (!initialized) return
             if (!isIndexRangeValid(e)) {
                 refreshRegistrations()
                 afterModelChange()
@@ -234,6 +232,7 @@ class MontoyaExtension : BurpExtension {
         }
 
         override fun intervalAdded(e: ListDataEvent) {
+            if (!initialized) return
             if (!isIndexRangeValid(e)) {
                 refreshRegistrations()
                 afterModelChange()
@@ -246,6 +245,7 @@ class MontoyaExtension : BurpExtension {
         }
 
         override fun intervalRemoved(e: ListDataEvent) {
+            if (!initialized) return
             if (!isIndexRangeValid(e)) {
                 refreshRegistrations()
                 afterModelChange()
