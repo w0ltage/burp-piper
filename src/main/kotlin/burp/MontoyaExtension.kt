@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.text.Charsets
-import com.redpois0n.terminal.JTerminal
+import burp.ui.AnsiTextPane
 import javax.swing.DefaultListModel
 import javax.swing.JTabbedPane
 import javax.swing.JScrollPane
@@ -482,26 +482,23 @@ class MontoyaExtension : BurpExtension {
     }
 
     private inner class TerminalView {
-        private val terminal = JTerminal().apply { isEditable = false }
-        private val scrollPane = JScrollPane(terminal).apply {
-            val backgroundColor = terminal.background
+        private val textPane = AnsiTextPane()
+        private val scrollPane = JScrollPane(textPane).apply {
+            val backgroundColor = textPane.background
             background = backgroundColor
             viewport.background = backgroundColor
         }
 
         fun component(): Component = scrollPane
 
-        fun selectedBytes(): kotlin.ByteArray? = terminal.selectedText?.toByteArray()
+        fun selectedBytes(): kotlin.ByteArray? = textPane.selectedText?.toByteArray()
 
         fun clear() {
-            SwingUtilities.invokeLater { terminal.text = "" }
+            textPane.clearContent()
         }
 
         fun showMessage(line: String) {
-            SwingUtilities.invokeLater {
-                terminal.text = ""
-                terminal.append("$line\n")
-            }
+            textPane.setAnsiText("$line\n")
         }
 
         fun processOutput(process: Process) {
@@ -510,11 +507,13 @@ class MontoyaExtension : BurpExtension {
             val latch = CountDownLatch(streams.size)
             streams.forEach { stream ->
                 thread(start = true) {
-                    stream.bufferedReader().use { reader ->
+                    stream.reader(Charsets.UTF_8).use { reader ->
+                        val buffer = CharArray(2048)
                         try {
                             while (true) {
-                                val line = reader.readLine() ?: break
-                                appendLine(line)
+                                val read = reader.read(buffer)
+                                if (read == -1) break
+                                textPane.appendAnsi(String(buffer, 0, read))
                             }
                         } finally {
                             latch.countDown()
@@ -522,11 +521,11 @@ class MontoyaExtension : BurpExtension {
                     }
                 }
             }
-            latch.await()
-        }
-
-        private fun appendLine(line: String) {
-            SwingUtilities.invokeLater { terminal.append("$line\n") }
+            try {
+                latch.await()
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
         }
     }
 
