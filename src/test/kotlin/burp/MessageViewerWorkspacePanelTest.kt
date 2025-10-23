@@ -74,4 +74,51 @@ class MessageViewerWorkspacePanelTest {
         assertTrue(updatedViewer !== originalViewer, "Model entry should be replaced with new instance")
         assertTrue(updatedViewer.common.enabled, "Viewer should be enabled after saving from workspace")
     }
+
+    @Test
+    fun enablingAllDisabledViewersKeepsThemEnabled() {
+        val config = ConfigModel(loadDefaultConfig())
+        val model = config.messageViewersModel
+
+        val disabledNames = listOf(
+            "OpenSSL ASN.1 decoder",
+            "DumpASN1",
+            "hd",
+            "ProtoBuf",
+        )
+
+        val panel = createMessageViewerManager(
+            model,
+            /* parent = */ null,
+            config.commentatorsModel,
+            switchToCommentator = {},
+        ) as MessageViewerWorkspacePanel
+
+        SwingUtilities.invokeAndWait {
+            val listField = MessageViewerWorkspacePanel::class.java.getDeclaredField("list").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val list = listField.get(panel) as JList<Piper.MessageViewer>
+
+            val headerField = MessageViewerWorkspacePanel::class.java.getDeclaredField("header").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val header = headerField.get(panel) as WorkspaceHeaderPanel<Any?>
+
+            val saveButtonField = MessageViewerWorkspacePanel::class.java.getDeclaredField("saveButton").apply { isAccessible = true }
+            val saveButton = saveButtonField.get(panel) as JButton
+
+            for (name in disabledNames) {
+                val index = (0 until model.size).first { model.getElementAt(it).common.name == name }
+                list.selectedIndex = index
+                if (!header.enabledToggle.isSelected) {
+                    header.enabledToggle.doClick()
+                }
+                saveButton.doClick()
+            }
+        }
+
+        for (name in disabledNames) {
+            val viewer = (0 until model.size).map { model.getElementAt(it) }.first { it.common.name == name }
+            assertTrue(viewer.common.enabled, "Viewer $name should remain enabled after saving")
+        }
+    }
 }

@@ -94,7 +94,7 @@ private fun ViewerEditorState.toMessageViewer(): Piper.MessageViewer {
         name = this@toMessageViewer.name
         if (this@toMessageViewer.enabled) enabled = true
         scope = this@toMessageViewer.scope
-        if (filter != null) filter = this@toMessageViewer.filter
+        this@toMessageViewer.filter?.let { filter = it }
         cmd = this@toMessageViewer.command.toBuilder()
             .clearRequiredInPath()
             .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
@@ -111,7 +111,7 @@ private fun ViewerEditorState.toCommentator(): Piper.Commentator {
         name = this@toCommentator.name
         if (this@toCommentator.enabled) enabled = true
         scope = this@toCommentator.scope
-        if (filter != null) filter = this@toCommentator.filter
+        this@toCommentator.filter?.let { filter = it }
         cmd = this@toCommentator.command.toBuilder()
             .clearRequiredInPath()
             .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
