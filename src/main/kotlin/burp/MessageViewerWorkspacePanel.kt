@@ -102,7 +102,7 @@ private fun ViewerEditorState.toMessageViewer(): Piper.MessageViewer {
     }.build()
     return Piper.MessageViewer.newBuilder().apply {
         common = minimal
-        if (usesColors) usesColors = true
+        usesColors = this@toMessageViewer.usesColors
     }.build()
 }
 
@@ -497,7 +497,7 @@ class MessageViewerWorkspacePanel(
         current.scope = snapshot.scope
         current.command = commandSnapshot.command
         current.filter = filter
-        current.usesColors = commandSnapshot.usesAnsi
+        current.usesColors = commandTab.isAnsiSelected()
         current.templateId = snapshot.templateId
         overview.display(current)
         return current
@@ -771,7 +771,7 @@ class CommentatorWorkspacePanel(
         state.tags = commandSnapshot.tags.toMutableList()
         state.dependencies = commandSnapshot.dependencies.toMutableList()
         state.command = commandSnapshot.command
-        state.usesColors = commandSnapshot.usesAnsi
+        state.usesColors = commandTab.isAnsiSelected()
         state.filter = filter
         val (overwrite, applyListener) = commentOptions.snapshot()
         state.overwrite = overwrite

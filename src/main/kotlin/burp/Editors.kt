@@ -1,6 +1,6 @@
 package burp
 
-import com.redpois0n.terminal.JTerminal
+import burp.ui.AnsiTextPane
 import java.awt.Component
 import java.io.IOException
 import javax.swing.JScrollPane
@@ -69,37 +69,43 @@ abstract class Editor(protected val tool: Piper.MessageViewer,
     }
 }
 
-class TerminalEditor(tool: Piper.MessageViewer, helpers: IExtensionHelpers, callbacks: IBurpExtenderCallbacks,
-                     context: PiperContext, isEnabledSupplier: () -> Boolean) :
-        Editor(tool, helpers, callbacks, context, isEnabledSupplier) {
-    private val terminal = JTerminal()
-    private val scrollPane = JScrollPane()
-
-    init {
-        scrollPane.setViewportView(terminal)
+class TerminalEditor(
+    tool: Piper.MessageViewer,
+    helpers: IExtensionHelpers,
+    callbacks: IBurpExtenderCallbacks,
+    context: PiperContext,
+    isEnabledSupplier: () -> Boolean,
+) : Editor(tool, helpers, callbacks, context, isEnabledSupplier) {
+    private val textPane = AnsiTextPane()
+    private val scrollPane = JScrollPane(textPane).apply {
+        val backgroundColor = textPane.background
+        background = backgroundColor
+        viewport.background = backgroundColor
     }
 
-    override fun getSelectedData(): ByteArray = helpers.stringToBytes(terminal.selectedText)
-    override fun getUiComponent(): Component = terminal
+    override fun getSelectedData(): ByteArray = helpers.stringToBytes(textPane.selectedText ?: "")
+    override fun getUiComponent(): Component = scrollPane
 
     override fun outputProcessor(process: Process) {
-        terminal.text = ""
-        for (stream in arrayOf(process.inputStream, process.errorStream)) {
-            thread {
-                val reader = stream.bufferedReader()
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    terminal.append("$line\n")
+        textPane.clearContent()
+        val streams = listOf(process.inputStream, process.errorStream)
+        streams.forEach { stream ->
+            thread(start = true) {
+                stream.reader(Charsets.UTF_8).use { reader ->
+                    val buffer = CharArray(2048)
+                    while (true) {
+                        val read = reader.read(buffer)
+                        if (read == -1) break
+                        textPane.appendAnsi(String(buffer, 0, read))
+                    }
                 }
-            }.start()
+            }
         }
     }
+
     override fun handleExecutionFailure(e: IOException) {
         val message = "Failed to execute ${tool.common.cmd.commandLine}: ${e.message}"
-        SwingUtilities.invokeLater {
-            terminal.text = ""
-            terminal.append("$message\n")
-        }
+        SwingUtilities.invokeLater { textPane.setAnsiText("$message\n") }
         logToError(message)
     }
 }

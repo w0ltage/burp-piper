@@ -18,7 +18,7 @@
 
 package burp
 
-import com.redpois0n.terminal.JTerminal
+import burp.ui.AnsiTextPane
 import org.snakeyaml.engine.v1.api.Dump
 import org.snakeyaml.engine.v1.api.DumpSettingsBuilder
 import org.zeromq.codec.Z85
@@ -1112,26 +1112,32 @@ private fun Piper.Config.disableMessageViewersByName(names: Set<String>): Piper.
 }
 
 private fun handleGUI(process: Process, tools: List<Piper.MinimalTool>) {
-    val terminal = JTerminal()
-    val scrollPane = JScrollPane()
-    scrollPane.setViewportView(terminal)
+    val textPane = AnsiTextPane()
+    val scrollPane = JScrollPane(textPane).apply {
+        val backgroundColor = textPane.background
+        background = backgroundColor
+        viewport.background = backgroundColor
+    }
     val frame = JFrame()
     with(frame) {
         defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
-        addKeyListener(terminal.keyListener)
         add(scrollPane)
         setSize(675, 300)
         title = tools.joinToString(separator = " | ", prefix = "$NAME - ", transform = Piper.MinimalTool::getName)
         isVisible = true
     }
 
-    for (stream in arrayOf(process.inputStream, process.errorStream)) {
-        thread {
-            val reader = stream.bufferedReader()
-            while (true) {
-                val line = reader.readLine() ?: break
-                terminal.append("$line\n")
+    val streams = listOf(process.inputStream, process.errorStream)
+    streams.forEach { stream ->
+        thread(start = true) {
+            stream.reader(Charsets.UTF_8).use { reader ->
+                val buffer = CharArray(2048)
+                while (true) {
+                    val read = reader.read(buffer)
+                    if (read == -1) break
+                    textPane.appendAnsi(String(buffer, 0, read))
+                }
             }
-        }.start()
+        }
     }
 }

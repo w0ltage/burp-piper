@@ -609,7 +609,7 @@ class MessageViewerDialog(private val messageViewer: Piper.MessageViewer, parent
 
     override fun processGUI(mt: Piper.MinimalTool): Piper.MessageViewer = Piper.MessageViewer.newBuilder().apply {
         common = mt
-        if (cbUsesColors.isSelected) usesColors = true
+        usesColors = cbUsesColors.isSelected
     }.build()
 
     override fun buildEnabled(value: Boolean): Piper.MessageViewer = messageViewer.buildEnabled(value)
