@@ -810,6 +810,8 @@ class WorkspaceCommandPanel(
             tags = tags,
         )
     }
+
+    fun isAnsiSelected(): Boolean = ansiCheck?.isSelected ?: false
 }
 
 class WorkspaceHistoryPanel : JPanel(BorderLayout()) {
