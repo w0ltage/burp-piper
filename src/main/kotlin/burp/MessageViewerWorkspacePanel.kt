@@ -92,9 +92,9 @@ private fun Piper.Commentator.toEditorState(index: Int): ViewerEditorState {
 private fun ViewerEditorState.toMessageViewer(): Piper.MessageViewer {
     val minimal = Piper.MinimalTool.newBuilder().apply {
         name = this@toMessageViewer.name
-        if (enabled) enabled = true
+        if (this@toMessageViewer.enabled) enabled = true
         scope = this@toMessageViewer.scope
-        if (filter != null) filter = this@toMessageViewer.filter
+        this@toMessageViewer.filter?.let { filter = it }
         cmd = this@toMessageViewer.command.toBuilder()
             .clearRequiredInPath()
             .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
@@ -109,9 +109,9 @@ private fun ViewerEditorState.toMessageViewer(): Piper.MessageViewer {
 private fun ViewerEditorState.toCommentator(): Piper.Commentator {
     val minimal = Piper.MinimalTool.newBuilder().apply {
         name = this@toCommentator.name
-        if (enabled) enabled = true
+        if (this@toCommentator.enabled) enabled = true
         scope = this@toCommentator.scope
-        if (filter != null) filter = this@toCommentator.filter
+        this@toCommentator.filter?.let { filter = it }
         cmd = this@toCommentator.command.toBuilder()
             .clearRequiredInPath()
             .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
@@ -491,7 +491,7 @@ class MessageViewerWorkspacePanel(
         val filter = filterTab.value()
         val current = currentState ?: ViewerEditorState()
         current.name = snapshot.name.trim()
-        current.enabled = snapshot.enabled
+        current.enabled = header.enabledToggle.isSelected
         current.tags = commandSnapshot.tags.toMutableList()
         current.dependencies = commandSnapshot.dependencies.toMutableList()
         current.scope = snapshot.scope
