@@ -27,7 +27,7 @@ public class JTerminal extends JTextPane {
 
 	public static final Font DEFAULT_FONT;
 	public static final Color DEFAULT_FOREGROUND = Color.white;
-	public static final Color DEFAULT_BACKGROUND = Color.black;
+        public static final Color DEFAULT_BACKGROUND = new Color(0x32, 0x33, 0x34);
 	public static final char NULL_CHAR = '\u0000';
 	
 	public static final char ESCAPE = 27;
@@ -70,7 +70,7 @@ public class JTerminal extends JTextPane {
 		COLORS.put("45", Color.magenta.darker());
 		COLORS.put("46", Color.cyan.darker());
 		COLORS.put("47", Color.lightGray);
-		COLORS.put("49", DEFAULT_FOREGROUND);
+                COLORS.put("49", DEFAULT_BACKGROUND);
 
 		// Bright colors
 		COLORS.put("100", Color.gray);

@@ -37,7 +37,6 @@ import com.redpois0n.terminal.JTerminal
 import javax.swing.DefaultListModel
 import javax.swing.JTabbedPane
 import javax.swing.JScrollPane
-import javax.swing.JTextArea
 import javax.swing.SwingUtilities
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
@@ -407,14 +406,13 @@ class MontoyaExtension : BurpExtension {
         viewer: Piper.MessageViewer,
         enabledFlag: AtomicBoolean,
     ) : BaseMessageViewerEditor(viewer, enabledFlag, true), ExtensionProvidedHttpRequestEditor {
-        private val textArea = JTextArea().apply { isEditable = false }
-        private val scrollPane = JScrollPane(textArea)
+        private val terminalView = TerminalView()
 
         override fun getRequest(): burp.api.montoya.http.message.requests.HttpRequest {
             return currentMessage()?.request() ?: burp.api.montoya.http.message.requests.HttpRequest.httpRequest()
         }
 
-        override fun component(): Component = scrollPane
+        override fun component(): Component = terminalView.component()
 
         override fun messageBytes(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): kotlin.ByteArray? {
             return requestResponse.request()?.toByteArray()?.getBytes()
@@ -429,37 +427,30 @@ class MontoyaExtension : BurpExtension {
         override fun url(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): URL? =
             parseUrl(requestResponse.request()?.url())
 
-        override fun processOutput(process: Process) {
-            val output = process.inputStream.use { it.readBytes() }
-            process.errorStream.use { it.readBytes() }
-            SwingUtilities.invokeLater { textArea.text = bytesToString(output) }
-        }
+        override fun processOutput(process: Process) = terminalView.processOutput(process)
 
         override fun handleExecutionFailure(e: IOException) {
             val message = "Failed to execute ${viewer.common.cmd.commandLine}: ${e.message}"
-            SwingUtilities.invokeLater { textArea.text = message }
+            terminalView.showMessage(message)
             logError(message)
         }
 
-        override fun resetUi() {
-            SwingUtilities.invokeLater { textArea.text = "" }
-        }
+        override fun resetUi() = terminalView.clear()
 
-        override fun selectedBytes(): kotlin.ByteArray? = textArea.selectedText?.toByteArray()
+        override fun selectedBytes(): kotlin.ByteArray? = terminalView.selectedBytes()
     }
 
     private inner class ResponseMessageViewerEditor(
         viewer: Piper.MessageViewer,
         enabledFlag: AtomicBoolean,
     ) : BaseMessageViewerEditor(viewer, enabledFlag, false), ExtensionProvidedHttpResponseEditor {
-        private val terminal = JTerminal()
-        private val scrollPane = JScrollPane(terminal)
+        private val terminalView = TerminalView()
 
         override fun getResponse(): burp.api.montoya.http.message.responses.HttpResponse {
             return currentMessage()?.response() ?: burp.api.montoya.http.message.responses.HttpResponse.httpResponse()
         }
 
-        override fun component(): Component = scrollPane
+        override fun component(): Component = terminalView.component()
 
         override fun messageBytes(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): kotlin.ByteArray? {
             if (!requestResponse.hasResponse()) {
@@ -477,51 +468,65 @@ class MontoyaExtension : BurpExtension {
         override fun url(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): URL? =
             parseUrl(requestResponse.url())
 
-        override fun processOutput(process: Process) {
-            clearTerminal()
-            val readers = listOf(process.inputStream.bufferedReader(), process.errorStream.bufferedReader())
-            val latch = CountDownLatch(readers.size)
-            readers.forEach { reader ->
+        override fun processOutput(process: Process) = terminalView.processOutput(process)
+
+        override fun handleExecutionFailure(e: IOException) {
+            val message = "Failed to execute ${viewer.common.cmd.commandLine}: ${e.message}"
+            terminalView.showMessage(message)
+            logError(message)
+        }
+
+        override fun resetUi() = terminalView.clear()
+
+        override fun selectedBytes(): kotlin.ByteArray? = terminalView.selectedBytes()
+    }
+
+    private inner class TerminalView {
+        private val terminal = JTerminal().apply { isEditable = false }
+        private val scrollPane = JScrollPane(terminal).apply {
+            val backgroundColor = terminal.background
+            background = backgroundColor
+            viewport.background = backgroundColor
+        }
+
+        fun component(): Component = scrollPane
+
+        fun selectedBytes(): kotlin.ByteArray? = terminal.selectedText?.toByteArray()
+
+        fun clear() {
+            SwingUtilities.invokeLater { terminal.text = "" }
+        }
+
+        fun showMessage(line: String) {
+            SwingUtilities.invokeLater {
+                terminal.text = ""
+                terminal.append("$line\n")
+            }
+        }
+
+        fun processOutput(process: Process) {
+            clear()
+            val streams = listOf(process.inputStream, process.errorStream)
+            val latch = CountDownLatch(streams.size)
+            streams.forEach { stream ->
                 thread(start = true) {
-                    try {
-                        while (true) {
-                            val line = reader.readLine() ?: break
-                            appendLine(line)
+                    stream.bufferedReader().use { reader ->
+                        try {
+                            while (true) {
+                                val line = reader.readLine() ?: break
+                                appendLine(line)
+                            }
+                        } finally {
+                            latch.countDown()
                         }
-                    } finally {
-                        latch.countDown()
-                        reader.close()
                     }
                 }
             }
             latch.await()
         }
 
-        override fun handleExecutionFailure(e: IOException) {
-            val message = "Failed to execute ${viewer.common.cmd.commandLine}: ${e.message}"
-            showSingleLine(message)
-            logError(message)
-        }
-
-        override fun resetUi() {
-            clearTerminal()
-        }
-
-        override fun selectedBytes(): kotlin.ByteArray? = terminal.selectedText?.toByteArray()
-
-        private fun clearTerminal() {
-            SwingUtilities.invokeLater { terminal.text = "" }
-        }
-
         private fun appendLine(line: String) {
             SwingUtilities.invokeLater { terminal.append("$line\n") }
-        }
-
-        private fun showSingleLine(line: String) {
-            SwingUtilities.invokeLater {
-                terminal.text = ""
-                terminal.append("$line\n")
-            }
         }
     }
 
