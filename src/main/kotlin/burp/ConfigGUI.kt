@@ -196,7 +196,7 @@ class MinimalToolWidget(
     tool: Piper.MinimalTool,
     private val panel: Container,
     cs: GridBagConstraints,
-    parent: Window,
+    parent: Component?,
     showPassHeaders: Boolean,
     private val purpose: CommandInvocationPurpose,
     private val showScope: Boolean,

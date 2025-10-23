@@ -200,7 +200,7 @@ private abstract class MinimalToolInlineEditor<T>(
             extractCommon(value),
             formPanel,
             cs,
-            locateWindow(),
+            locateParentComponent(),
             config.showPassHeaders,
             config.purpose,
             config.showScope,
@@ -240,13 +240,11 @@ private abstract class MinimalToolInlineEditor<T>(
         dirtyListener?.invoke()
     }
 
-    private fun locateWindow(): Window {
-        val parentWindow = when (parent) {
-            is Window -> parent
-            is Component -> SwingUtilities.getWindowAncestor(parent)
-            else -> null
+    private fun locateParentComponent(): Component? {
+        return when (parent) {
+            is Component -> parent
+            else -> SwingUtilities.getWindowAncestor(this)
         }
-        return parentWindow ?: SwingUtilities.getWindowAncestor(this) ?: JOptionPane.getRootFrame()
     }
 
     private fun attachDirtyListeners(root: Container) {
