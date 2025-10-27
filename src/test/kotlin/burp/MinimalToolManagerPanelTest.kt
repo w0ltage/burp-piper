@@ -1,5 +1,6 @@
 package burp
 
+import org.testng.Assert.assertFalse
 import org.testng.Assert.assertTrue
 import org.testng.annotations.Test
 import java.awt.Component
@@ -21,6 +22,19 @@ class MinimalToolManagerPanelTest {
 
         val updated = model.getElementAt(0)
         assertTrue(updated.common.enabled, "Context menu item should remain enabled after saving")
+    }
+
+    @Test
+    fun disablingContextMenuItemSavesDisabledState() {
+        val model = DefaultListModel<Piper.UserActionTool>()
+        model.addElement(sampleUserActionTool("Context menu sample").buildEnabled(true))
+
+        val panel = createMenuItemManager(model, /* parent = */ null)
+
+        disableFirstToolViaMinimalPanel(panel)
+
+        val updated = model.getElementAt(0)
+        assertFalse(updated.common.enabled, "Context menu item should remain disabled after saving")
     }
 
     @Test
@@ -129,6 +143,34 @@ class MinimalToolManagerPanelTest {
             val headerField = panelClass.getDeclaredField("header").apply { isAccessible = true }
             val header = headerField.get(panel) as WorkspaceHeaderPanel<*>
             if (!header.enabledToggle.isSelected) {
+                header.enabledToggle.doClick()
+            }
+
+            val saveButtonField = panelClass.getDeclaredField("saveButton").apply { isAccessible = true }
+            val saveButton = saveButtonField.get(panel) as JButton
+            check(saveButton.isEnabled) { "Save button should be enabled after toggling" }
+            saveButton.doClick()
+        }
+    }
+
+    private fun disableFirstToolViaMinimalPanel(panel: Component) {
+        SwingUtilities.invokeAndWait {
+            val panelClass = panel.javaClass
+            val listField = panelClass.getDeclaredField("list").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val list = listField.get(panel) as JList<Any?>
+            if (list.selectedIndex < 0 && list.model.size > 0) {
+                list.selectedIndex = 0
+            }
+
+            val editorField = panelClass.getDeclaredField("editor").apply { isAccessible = true }
+            val editor = editorField.get(panel)
+            val widgetField = findField(editor, "widget")
+            val widget = widgetField.get(editor) ?: error("Minimal tool widget should be available")
+            val headerField = findField(widget, "header")
+            val header = headerField.get(widget) as WorkspaceHeaderPanel<*>
+
+            if (header.enabledToggle.isSelected) {
                 header.enabledToggle.doClick()
             }
 
