@@ -1,10 +1,12 @@
 package burp
 
+import org.testng.Assert.assertFalse
 import org.testng.Assert.assertTrue
 import org.testng.annotations.Test
 import java.awt.Component
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JList
 import javax.swing.SwingUtilities
 
@@ -21,6 +23,35 @@ class MinimalToolManagerPanelTest {
 
         val updated = model.getElementAt(0)
         assertTrue(updated.common.enabled, "Context menu item should remain enabled after saving")
+    }
+
+    @Test
+    fun disablingContextMenuItemSavesDisabledState() {
+        val model = DefaultListModel<Piper.UserActionTool>()
+        model.addElement(sampleUserActionTool("Context menu sample").buildEnabled(true))
+
+        val panel = createMenuItemManager(model, /* parent = */ null)
+
+        disableFirstToolViaMinimalPanel(panel)
+
+        val updated = model.getElementAt(0)
+        assertFalse(updated.common.enabled, "Context menu item should remain disabled after saving")
+    }
+
+    @Test
+    fun togglingPassHeadersInContextMenuBehaviorTabPersists() {
+        val model = DefaultListModel<Piper.UserActionTool>()
+        model.addElement(sampleUserActionTool("Context menu sample"))
+
+        val panel = createMenuItemManager(model, /* parent = */ null)
+
+        togglePassHeaders(panel, enabled = true)
+        val enabledTool = model.getElementAt(0)
+        assertTrue(enabledTool.common.cmd.passHeaders, "Context menu item should enable pass headers after saving")
+
+        togglePassHeaders(panel, enabled = false)
+        val disabledTool = model.getElementAt(0)
+        assertFalse(disabledTool.common.cmd.passHeaders, "Context menu item should disable pass headers after saving")
     }
 
     @Test
@@ -136,6 +167,64 @@ class MinimalToolManagerPanelTest {
             val saveButton = saveButtonField.get(panel) as JButton
             check(saveButton.isEnabled) { "Save button should be enabled after toggling" }
             saveButton.doClick()
+        }
+    }
+
+    private fun disableFirstToolViaMinimalPanel(panel: Component) {
+        SwingUtilities.invokeAndWait {
+            val panelClass = panel.javaClass
+            val listField = panelClass.getDeclaredField("list").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val list = listField.get(panel) as JList<Any?>
+            if (list.selectedIndex < 0 && list.model.size > 0) {
+                list.selectedIndex = 0
+            }
+
+            val editorField = panelClass.getDeclaredField("editor").apply { isAccessible = true }
+            val editor = editorField.get(panel)
+            val widgetField = findField(editor, "widget")
+            val widget = widgetField.get(editor) ?: error("Minimal tool widget should be available")
+            val headerField = findField(widget, "header")
+            val header = headerField.get(widget) as WorkspaceHeaderPanel<*>
+
+            if (header.enabledToggle.isSelected) {
+                header.enabledToggle.doClick()
+            }
+
+            val saveButtonField = panelClass.getDeclaredField("saveButton").apply { isAccessible = true }
+            val saveButton = saveButtonField.get(panel) as JButton
+            check(saveButton.isEnabled) { "Save button should be enabled after toggling" }
+            saveButton.doClick()
+        }
+    }
+
+    private fun togglePassHeaders(panel: Component, enabled: Boolean) {
+        SwingUtilities.invokeAndWait {
+            val panelClass = panel.javaClass
+            val listField = panelClass.getDeclaredField("list").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val list = listField.get(panel) as JList<Any?>
+            if (list.selectedIndex < 0 && list.model.size > 0) {
+                list.selectedIndex = 0
+            }
+
+            val editorField = panelClass.getDeclaredField("editor").apply { isAccessible = true }
+            val editor = editorField.get(panel)
+            val widgetField = findField(editor, "widget")
+            val widget = widgetField.get(editor) ?: error("Minimal tool widget should be available")
+            val passHeadersField = findField(widget, "passHeadersCheckBox")
+            val passHeaders = requireNotNull(passHeadersField.get(widget) as? JCheckBox) {
+                "Pass headers checkbox should be available"
+            }
+            if (passHeaders.isSelected != enabled) {
+                passHeaders.doClick()
+            }
+
+            val saveButtonField = panelClass.getDeclaredField("saveButton").apply { isAccessible = true }
+            val saveButton = saveButtonField.get(panel) as JButton
+            if (saveButton.isEnabled) {
+                saveButton.doClick()
+            }
         }
     }
 

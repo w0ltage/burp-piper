@@ -64,6 +64,7 @@ class CommandInvocationEditor(
     private val hintLabel = JLabel("Define success conditions using filters or exit codes")
     private val dependenciesField = if (config.showInputTab && config.showDependenciesField) JTextField() else null
     private val changeListeners = mutableListOf<() -> Unit>()
+    private var passHeadersSetting: Boolean = false
 
     init {
         border = EmptyBorder(8, 8, 8, 8)
@@ -132,6 +133,7 @@ class CommandInvocationEditor(
         commandPanel.setTokens(command.buildTokenList())
         parametersPanel?.setParameters(command.parameterList.map { it.toParameterState() })
         ioPanel?.setInputMethod(command.inputMethod, command.exitCodeList, command.passHeaders)
+        passHeadersSetting = command.passHeaders
         dependenciesField?.text = command.requiredInPathList.joinToString(", ")
         if (stdoutPanel != null && stderrPanel != null) {
             stdoutPanel.setValue(command.stdout)
@@ -149,20 +151,15 @@ class CommandInvocationEditor(
             throw IllegalStateException("Parameter names must be unique: ${duplicateNames.keys.joinToString(", ")}")
         }
         val ioSnapshot = ioPanel?.snapshot()
+        val method = ioSnapshot?.method ?: Piper.CommandInvocation.InputMethod.STDIN
+        val exitCodes = ioSnapshot?.exitCodes ?: emptyList()
+        val passHeaders = ioSnapshot?.passHeaders ?: passHeadersSetting
         val builder = Piper.CommandInvocation.newBuilder()
-        if (ioSnapshot != null) {
-            builder.setInputMethod(ioSnapshot.method)
-                .setPassHeaders(ioSnapshot.passHeaders)
-                .addAllPrefix(tokens.prefixTokens(ioSnapshot.method))
-                .addAllPostfix(tokens.postfixTokens(ioSnapshot.method))
-                .addAllExitCode(ioSnapshot.exitCodes)
-        } else {
-            val defaultMethod = Piper.CommandInvocation.InputMethod.STDIN
-            builder.setInputMethod(defaultMethod)
-                .setPassHeaders(false)
-                .addAllPrefix(tokens.prefixTokens(defaultMethod))
-                .addAllPostfix(tokens.postfixTokens(defaultMethod))
-        }
+            .setInputMethod(method)
+            .setPassHeaders(passHeaders)
+            .addAllPrefix(tokens.prefixTokens(method))
+            .addAllPostfix(tokens.postfixTokens(method))
+            .addAllExitCode(exitCodes)
             .addAllParameter(parameters.map { it.toProtoParameter() })
         if (dependenciesField != null) {
             val dependencies = dependenciesField.text.split(',').mapNotNull {
@@ -183,6 +180,17 @@ class CommandInvocationEditor(
     fun setHintText(text: String) {
         hintLabel.text = text
     }
+
+    fun setPassHeaders(value: Boolean) {
+        if (ioPanel != null) {
+            ioPanel.setPassHeaders(value)
+        } else if (passHeadersSetting != value) {
+            passHeadersSetting = value
+            notifyChanged()
+        }
+    }
+
+    fun passHeaders(): Boolean = ioPanel?.passHeaders() ?: passHeadersSetting
 
     private fun notifyChanged() {
         changeListeners.forEach { it.invoke() }
@@ -576,6 +584,18 @@ class InputMethodPanel(
         exitCodesField.text = exitCodes.joinToString(", ")
         passHeadersBox.isSelected = passHeaders && showPassHeaders
     }
+
+    fun setPassHeaders(value: Boolean) {
+        if (!showPassHeaders) {
+            return
+        }
+        if (passHeadersBox.isSelected != value) {
+            passHeadersBox.isSelected = value
+            onChange()
+        }
+    }
+
+    fun passHeaders(): Boolean = passHeadersBox.isSelected && showPassHeaders
 
     fun snapshot(): CommandInputSnapshot {
         val method = if (filenameButton.isSelected) Piper.CommandInvocation.InputMethod.FILENAME

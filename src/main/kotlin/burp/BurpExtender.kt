@@ -1100,6 +1100,7 @@ fun loadDefaultConfig(): Piper.Config {
             .getResourceAsStream("defaults.yaml").reader().readText())
             .updateEnabled(true)
             .disableMessageViewersByName(MESSAGE_VIEWERS_DISABLED_BY_DEFAULT)
+            .disableMenuItems()
 }
 
 private fun Piper.Config.disableMessageViewersByName(names: Set<String>): Piper.Config {
@@ -1108,6 +1109,16 @@ private fun Piper.Config.disableMessageViewersByName(names: Set<String>): Piper.
     builder.addAllMessageViewer(this.messageViewerList.map { viewer ->
         if (viewer.common.name in names) viewer.buildEnabled(false) else viewer
     })
+    return builder.build()
+}
+
+private fun Piper.Config.disableMenuItems(): Piper.Config {
+    if (this.menuItemCount == 0) {
+        return this
+    }
+    val builder = this.toBuilder()
+    builder.clearMenuItem()
+    builder.addAllMenuItem(this.menuItemList.map { it.buildEnabled(false) })
     return builder.build()
 }
 
