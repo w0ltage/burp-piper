@@ -131,13 +131,19 @@ class MontoyaExtension : BurpExtension {
 
     private inner class PiperContextMenuItemsProvider : ContextMenuItemsProvider {
         override fun provideMenuItems(event: ContextMenuEvent): List<Component> {
-            val selected = event.selectedRequestResponses()
+            val editorContext = event.messageEditorRequestResponse().orElse(null)
+            val selected = event.selectedRequestResponses().toMutableList()
+            if (editorContext != null) {
+                val editorMessage = editorContext.requestResponse()
+                if (editorMessage != null && !selected.contains(editorMessage)) {
+                    selected += editorMessage
+                }
+            }
             if (selected.isEmpty()) {
                 return emptyList()
             }
 
             val topLevel = JMenu(NAME)
-            val editorContext = event.messageEditorRequestResponse().orElse(null)
             val hasItems = generateContextMenu(selected, topLevel::add, editorContext)
             if (!hasItems) {
                 return emptyList()
