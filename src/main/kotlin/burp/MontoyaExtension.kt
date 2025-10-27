@@ -13,6 +13,9 @@ import burp.api.montoya.intruder.IntruderInsertionPoint
 import burp.api.montoya.intruder.PayloadProcessingResult
 import burp.api.montoya.intruder.PayloadProcessor
 import burp.api.montoya.ui.Selection
+import burp.api.montoya.ui.contextmenu.ContextMenuEvent
+import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider
+import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse
 import burp.api.montoya.ui.editor.extension.EditorCreationContext
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedEditor
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpRequestEditor
@@ -21,6 +24,7 @@ import burp.api.montoya.ui.editor.extension.HttpRequestEditorProvider
 import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
 import burp.api.montoya.utilities.ByteUtils
 import java.awt.Component
+import java.net.MalformedURLException
 import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
@@ -28,6 +32,8 @@ import java.net.URL
 import java.lang.reflect.InvocationTargetException
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.EnumMap
+import java.util.TreeMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -35,11 +41,22 @@ import kotlin.concurrent.thread
 import kotlin.text.Charsets
 import burp.ui.AnsiTextPane
 import javax.swing.DefaultListModel
+import javax.swing.JFrame
+import javax.swing.JMenu
+import javax.swing.JMenuItem
 import javax.swing.JTabbedPane
 import javax.swing.JScrollPane
 import javax.swing.SwingUtilities
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
+
+private fun parseUrlSafely(value: String?): URL? = value?.let {
+    try {
+        URL(it)
+    } catch (_: MalformedURLException) {
+        null
+    }
+}
 
 class MontoyaExtension : BurpExtension {
     private lateinit var api: MontoyaApi
@@ -49,6 +66,8 @@ class MontoyaExtension : BurpExtension {
     private lateinit var processorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var generatorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var messageViewerManager: MontoyaMessageViewerManager
+    @Suppress("unused")
+    private var contextMenuRegistration: Registration? = null
 
     private val emptyPayloadGenerator = object : PayloadGenerator {
         override fun generatePayloadFor(insertionPoint: IntruderInsertionPoint?): GeneratedPayload =
@@ -100,6 +119,7 @@ class MontoyaExtension : BurpExtension {
         )
 
         messageViewerManager = MontoyaMessageViewerManager(configModel.messageViewersModel)
+        contextMenuRegistration = api.userInterface().registerContextMenuItemsProvider(PiperContextMenuItemsProvider())
 
         suiteTabs = JTabbedPane()
         populatePiperTabs(suiteTabs, configModel, parent = null)
@@ -107,6 +127,23 @@ class MontoyaExtension : BurpExtension {
         api.logging().logToOutput("Piper suite tab registered")
 
         configModel.addPropertyChangeListener { saveConfig() }
+    }
+
+    private inner class PiperContextMenuItemsProvider : ContextMenuItemsProvider {
+        override fun provideMenuItems(event: ContextMenuEvent): List<Component> {
+            val selected = event.selectedRequestResponses()
+            if (selected.isEmpty()) {
+                return emptyList()
+            }
+
+            val topLevel = JMenu(NAME)
+            val editorContext = event.messageEditorRequestResponse().orElse(null)
+            val hasItems = generateContextMenu(selected, topLevel::add, editorContext)
+            if (!hasItems) {
+                return emptyList()
+            }
+            return listOf(topLevel)
+        }
     }
 
     private fun registerPayloadProcessor(tool: Piper.MinimalTool): Registration? {
@@ -300,6 +337,243 @@ class MontoyaExtension : BurpExtension {
     ) : HttpResponseEditorProvider {
         override fun provideHttpResponseEditor(creationContext: EditorCreationContext?): ExtensionProvidedHttpResponseEditor {
             return ResponseMessageViewerEditor(viewer, enabledFlag)
+        }
+    }
+
+    private enum class MessageDirection(val isRequest: Boolean, val displayName: String) {
+        REQUEST(true, "request"),
+        RESPONSE(false, "response");
+
+        fun messageBytes(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): kotlin.ByteArray? = when (this) {
+            REQUEST -> requestResponse.request().toByteArray().getBytes()
+            RESPONSE -> if (requestResponse.hasResponse()) requestResponse.response().toByteArray().getBytes() else null
+        }
+
+        fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? = when (this) {
+            REQUEST -> requestResponse.request().bodyOffset()
+            RESPONSE -> if (requestResponse.hasResponse()) requestResponse.response().bodyOffset() else null
+        }
+
+        fun headers(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): List<String>? = when (this) {
+            REQUEST -> requestResponse.request().headers().map { it.toString() }
+            RESPONSE -> if (requestResponse.hasResponse()) requestResponse.response().headers().map { it.toString() } else null
+        }
+
+        fun url(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): URL? = when (this) {
+            REQUEST -> parseUrlSafely(requestResponse.request().url())
+            RESPONSE -> parseUrlSafely(requestResponse.url())
+        }
+    }
+
+    private enum class Region(val includeHeaders: Boolean) {
+        WHOLE_MESSAGE(true),
+        HTTP_BODY(false),
+        SELECTION(false);
+    }
+
+    private data class MessageSource(val direction: MessageDirection, val region: Region) : Comparable<MessageSource> {
+        override fun compareTo(other: MessageSource): Int =
+            compareValuesBy(this, other, MessageSource::direction, MessageSource::region)
+    }
+
+    private fun generateContextMenu(
+        messages: List<burp.api.montoya.http.message.HttpRequestResponse>,
+        add: (Component) -> Component,
+        editorContext: MessageEditorHttpRequestResponse?,
+    ): Boolean {
+        if (messages.isEmpty()) {
+            return false
+        }
+
+        val details = messagesToMap(messages, editorContext)
+        if (details.isEmpty()) {
+            return false
+        }
+
+        val msize = messages.size
+        val plural = if (msize == 1) "" else "s"
+        val selectionMenuItems = mutableListOf<JMenuItem>()
+        val categoryMenus = EnumMap<MessageDirection, JMenu>(MessageDirection::class.java)
+
+        fun createSubMenu(source: MessageSource): JMenu =
+            JMenu("Process $msize ${source.direction.displayName}$plural")
+
+        fun EnumMap<MessageDirection, JMenu>.addMenuItemIfApplicable(
+            menuItem: Piper.UserActionTool,
+            viewer: Piper.MessageViewer?,
+            source: MessageSource,
+            info: List<MessageInfo>,
+        ) {
+            val (first, second) = if (viewer == null) {
+                menuItem.common to null
+            } else {
+                viewer.common to menuItem.common
+            }
+            if (!isToolApplicable(first, source, info, MessageInfoMatchStrategy.ALL)) {
+                return
+            }
+            val item = createMenuItem(first, second) {
+                performMenuAction(menuItem, info, viewer)
+            }
+            if (source.region == Region.SELECTION) {
+                selectionMenuItems.add(item)
+            } else {
+                this.getOrPut(source.direction) { createSubMenu(source) }.add(item)
+            }
+        }
+
+        for (tool in configModel.enabledMenuItems) {
+            if ((tool.maxInputs != 0 && tool.maxInputs < msize) || tool.minInputs > msize) {
+                continue
+            }
+            for ((source, info) in details) {
+                categoryMenus.addMenuItemIfApplicable(tool, null, source, info)
+                if (!tool.common.cmd.passHeaders && !tool.common.hasFilter() && !tool.avoidPipe) {
+                    configModel.enabledMessageViewers.forEach { viewer ->
+                        categoryMenus.addMenuItemIfApplicable(tool, viewer, source, info)
+                    }
+                }
+            }
+        }
+
+        categoryMenus.values.forEach { add(it) }
+        if (selectionMenuItems.isNotEmpty()) {
+            add(JMenu("Process selection").apply { selectionMenuItems.forEach { add(it) } })
+        }
+        return categoryMenus.isNotEmpty() || selectionMenuItems.isNotEmpty()
+    }
+
+    private fun messagesToMap(
+        messages: List<burp.api.montoya.http.message.HttpRequestResponse>,
+        editorContext: MessageEditorHttpRequestResponse?,
+    ): Map<MessageSource, List<MessageInfo>> {
+        val result = TreeMap<MessageSource, List<MessageInfo>>()
+        for (direction in MessageDirection.values()) {
+            val fullMessages = mutableListOf<MessageInfo>()
+            val bodies = mutableListOf<MessageInfo>()
+            messages.forEach { requestResponse ->
+                val bytes = direction.messageBytes(requestResponse)
+                if (bytes != null) {
+                    val headers = direction.headers(requestResponse)
+                    val url = direction.url(requestResponse)
+                    fullMessages.add(MessageInfo(bytes, context.bytesToString(bytes), headers, url))
+                    val offset = direction.bodyOffset(requestResponse)
+                    if (offset != null && offset < bytes.size) {
+                        val body = bytes.copyOfRange(offset, bytes.size)
+                        if (body.isNotEmpty()) {
+                            bodies.add(MessageInfo(body, context.bytesToString(body), headers, url))
+                        }
+                    }
+                }
+            }
+            if (fullMessages.isNotEmpty()) {
+                result[MessageSource(direction, Region.WHOLE_MESSAGE)] = fullMessages
+            }
+            if (bodies.isNotEmpty()) {
+                result[MessageSource(direction, Region.HTTP_BODY)] = bodies
+            }
+        }
+
+        if (editorContext != null) {
+            val range = editorContext.selectionOffsets().orElse(null)
+            if (range != null && range.startIndexInclusive() < range.endIndexExclusive()) {
+                val direction = when (editorContext.selectionContext()) {
+                    MessageEditorHttpRequestResponse.SelectionContext.REQUEST -> MessageDirection.REQUEST
+                    MessageEditorHttpRequestResponse.SelectionContext.RESPONSE -> MessageDirection.RESPONSE
+                    else -> null
+                }
+                if (direction != null) {
+                    val bytes = direction.messageBytes(editorContext.requestResponse())
+                    if (bytes != null) {
+                        val start = range.startIndexInclusive().coerceAtLeast(0)
+                        val end = range.endIndexExclusive().coerceAtMost(bytes.size)
+                        if (start < end) {
+                            val selection = bytes.copyOfRange(start, end)
+                            val headers = direction.headers(editorContext.requestResponse())
+                            val url = direction.url(editorContext.requestResponse())
+                            result[MessageSource(direction, Region.SELECTION)] = listOf(
+                                MessageInfo(selection, context.bytesToString(selection), headers, url),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        return result
+    }
+
+    private fun createMenuItem(
+        tool: Piper.MinimalTool,
+        pipe: Piper.MinimalTool?,
+        action: () -> Unit,
+    ): JMenuItem = JMenuItem(
+        tool.name + if (pipe == null) "" else " | ${pipe.name}",
+    ).apply { addActionListener { action() } }
+
+    private fun isToolApplicable(
+        tool: Piper.MinimalTool,
+        source: MessageSource,
+        info: List<MessageInfo>,
+        strategy: MessageInfoMatchStrategy,
+    ): Boolean =
+        tool.cmd.passHeaders == source.region.includeHeaders &&
+                tool.isInToolScope(source.direction.isRequest) &&
+                tool.canProcess(info, strategy, context)
+
+    private fun performMenuAction(
+        tool: Piper.UserActionTool,
+        messages: List<MessageInfo>,
+        viewer: Piper.MessageViewer?,
+    ) {
+        thread(start = true) {
+            val (input, tools) = if (viewer == null) {
+                messages.map(MessageInfo::asContentExtensionPair) to listOf(tool.common)
+            } else {
+                messages.map { message ->
+                    val processed = viewer.common.cmd.execute(message.asContentExtensionPair).processOutput { process ->
+                        process.inputStream.use { it.readBytes() }
+                    }
+                    processed to null
+                } to listOf(viewer.common, tool.common)
+            }
+
+            tool.common.cmd.execute(*input.toTypedArray()).processOutput { process ->
+                if (!tool.hasGUI) {
+                    handleGUI(process, tools)
+                }
+            }
+        }
+    }
+
+    private fun handleGUI(process: Process, tools: List<Piper.MinimalTool>) {
+        val textPane = AnsiTextPane()
+        val scrollPane = JScrollPane(textPane).apply {
+            val backgroundColor = textPane.background
+            background = backgroundColor
+            viewport.background = backgroundColor
+        }
+
+        JFrame().apply {
+            defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
+            add(scrollPane)
+            setSize(675, 300)
+            title = tools.joinToString(separator = " | ", prefix = "$NAME - ", transform = Piper.MinimalTool::getName)
+            isVisible = true
+        }
+
+        val streams = listOf(process.inputStream, process.errorStream)
+        streams.forEach { stream ->
+            thread(start = true) {
+                stream.reader(Charsets.UTF_8).use { reader ->
+                    val buffer = CharArray(2048)
+                    while (true) {
+                        val read = reader.read(buffer)
+                        if (read == -1) break
+                        textPane.appendAnsi(String(buffer, 0, read))
+                    }
+                }
+            }
         }
     }
 
