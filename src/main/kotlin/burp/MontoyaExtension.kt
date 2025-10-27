@@ -22,6 +22,8 @@ import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpRequestEditor
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpResponseEditor
 import burp.api.montoya.ui.editor.extension.HttpRequestEditorProvider
 import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
+import burp.api.montoya.http.message.requests.HttpRequest
+import burp.api.montoya.http.message.responses.HttpResponse
 import burp.api.montoya.utilities.ByteUtils
 import java.awt.Component
 import java.net.MalformedURLException
@@ -350,14 +352,9 @@ class MontoyaExtension : BurpExtension {
         REQUEST(true, "request"),
         RESPONSE(false, "response");
 
-        fun messageBytes(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): kotlin.ByteArray? = when (this) {
-            REQUEST -> requestResponse.request().toByteArray().getBytes()
-            RESPONSE -> if (requestResponse.hasResponse()) requestResponse.response().toByteArray().getBytes() else null
-        }
-
-        fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? = when (this) {
-            REQUEST -> requestResponse.request().bodyOffset()
-            RESPONSE -> if (requestResponse.hasResponse()) requestResponse.response().bodyOffset() else null
+        fun formattedMessage(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): FormattedHttpMessage? = when (this) {
+            REQUEST -> formatRequestMessage(requestResponse.request())
+            RESPONSE -> if (requestResponse.hasResponse()) formatResponseMessage(requestResponse.response()) else null
         }
 
         fun headers(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): List<String>? = when (this) {
@@ -458,13 +455,14 @@ class MontoyaExtension : BurpExtension {
             val fullMessages = mutableListOf<MessageInfo>()
             val bodies = mutableListOf<MessageInfo>()
             messages.forEach { requestResponse ->
-                val bytes = direction.messageBytes(requestResponse)
-                if (bytes != null) {
+                val message = direction.formattedMessage(requestResponse)
+                if (message != null) {
+                    val bytes = message.bytes
                     val headers = direction.headers(requestResponse)
                     val url = direction.url(requestResponse)
                     fullMessages.add(MessageInfo(bytes, context.bytesToString(bytes), headers, url))
-                    val offset = direction.bodyOffset(requestResponse)
-                    if (offset != null && offset < bytes.size) {
+                    val offset = message.bodyOffset
+                    if (offset < bytes.size) {
                         val body = bytes.copyOfRange(offset, bytes.size)
                         if (body.isNotEmpty()) {
                             bodies.add(MessageInfo(body, context.bytesToString(body), headers, url))
@@ -489,7 +487,8 @@ class MontoyaExtension : BurpExtension {
                     else -> null
                 }
                 if (direction != null) {
-                    val bytes = direction.messageBytes(editorContext.requestResponse())
+                    val message = direction.formattedMessage(editorContext.requestResponse())
+                    val bytes = message?.bytes
                     if (bytes != null) {
                         val start = range.startIndexInclusive().coerceAtLeast(0)
                         val end = range.endIndexExclusive().coerceAtMost(bytes.size)
@@ -695,11 +694,14 @@ class MontoyaExtension : BurpExtension {
         override fun component(): Component = terminalView.component()
 
         override fun messageBytes(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): kotlin.ByteArray? {
-            return requestResponse.request()?.toByteArray()?.getBytes()
+            val request = requestResponse.request() ?: return null
+            return formatRequestMessage(request).bytes
         }
 
-        override fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? =
-            requestResponse.request()?.bodyOffset()
+        override fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? {
+            val request = requestResponse.request() ?: return null
+            return formatRequestMessage(request).bodyOffset
+        }
 
         override fun headers(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): List<String>? =
             requestResponse.request()?.headers()?.map { it.toString() }
@@ -736,11 +738,14 @@ class MontoyaExtension : BurpExtension {
             if (!requestResponse.hasResponse()) {
                 return null
             }
-            return requestResponse.response()?.toByteArray()?.getBytes()
+            val response = requestResponse.response() ?: return null
+            return formatResponseMessage(response).bytes
         }
 
-        override fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? =
-            requestResponse.response()?.bodyOffset()
+        override fun bodyOffset(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): Int? {
+            val response = requestResponse.response() ?: return null
+            return formatResponseMessage(response).bodyOffset
+        }
 
         override fun headers(requestResponse: burp.api.montoya.http.message.HttpRequestResponse): List<String>? =
             requestResponse.response()?.headers()?.map { it.toString() }
