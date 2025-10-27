@@ -1,3 +1,5 @@
+## Project Overview
+
 This is a burp suite extension named "Piper" and written in Kotlin.
 
 Piper integrates external tools and their pipelines to Burp Suite. The extension can pass HTTP requests and responses from Burp to external programs, then feed the execution result back to Burp. With Piper you can create:
@@ -11,9 +13,38 @@ Piper integrates external tools and their pipelines to Burp Suite. The extension
 - Macros: You can use external tools as part of Macros. For example, you can automatically generate predictable CSRF tokens for every outgoing request.
 - HTTP Listeners: Transform outgoing and incoming HTTP messages. For example, you can use an external Python script to handle custom encryption.
 
-Currently it mostly uses the deprecated burp extender api instead of modern burp suite montoya api. If something needed to be rewritten, consider using the montoya api.
+## Build & Packaging
+- Always build with `./gradlew --no-daemon --console=plain clean shadowJar` so the bundled artifact includes the Kotlin runtime.
+- The distributable lives at `build/libs/auto-file-checker-<version>.jar`. Use this JAR when loading the extension into Burp Suite.
+- The plain `jar` task is disabled; do not re-enable it unless you provide an alternative way to supply the Kotlin stdlib.
 
-Burp Suite Montoya API documentation is available via this Context7 API (it uses embeddings to retrieve information). To use it you need to send a request to URL like this: https://context7.com/api/v1/portswigger/burp-extensions-montoya-api?type=json&tokens=100000&topic=<TOPIC>
 
-For example, you want to learn more on "http requests" in montoya api. To get relevant information all you need to do is to put keywords in parameter "topic", so it would become like this:
-https://context7.com/api/v1/portswigger/burp-extensions-montoya-api?type=json&tokens=100000&topic=http%20requests
+## Kotlin Implementation Notes
+- Follow idiomatic Kotlin style (use `data class`, `sealed` hierarchies, and null-safety instead of Java-style optional handling).
+- Prefer immutable collections from `kotlin.collections` unless mutation is required for Montoya callbacks.
+- Use coroutines only if you wire them into Montoya's threading expectations; current async work relies on Java executors via Kotlin interop.
+- Keep UI code on the Swing EDT by wrapping updates with `SwingUtilities.invokeLater { ... }`.
+
+## Montoya API Access
+Because direct MCP access is unavailable, fetch Montoya API documentation via HTTP GET requests to Context7 when you need clarification.
+
+**Endpoint template**
+```
+https://context7.com/api/v1/portswigger/burp-extensions-montoya-api?type=json&tokens=100000&topic=<TOPIC>
+```
+
+**Usage guidelines**
+- Form topics with 2–4 technical keywords (e.g., `ui%20suite%20tab`, `http%20request%20builder`).
+- Query before changing Montoya-dependent logic or when encountering compilation errors tied to Montoya classes.
+- Parse the JSON response and extract method signatures or examples relevant to the task at hand.
+- Retry with refined terms if the response lacks the needed details.
+
+## Logging & Diagnostics
+- Use `api.logging().logToOutput()` for informational messages and `logToError()` for failures.
+- Prefer structured log prefixes (e.g., `[AutoChecker]`) so Burp users can filter messages.
+- Async errors should be routed through the logging API within completion handlers.
+
+## Compatibility & Dependencies
+- Kotlin JVM toolchain pinned to 21—keep it aligned with the Burp Suite runtime.
+- Montoya API dependency is `net.portswigger.burp.extensions:montoya-api:2025.4`; update in lockstep with Burp releases and test against the latest Montoya SDK.
+- Avoid adding extra dependencies unless absolutely necessary; bundle everything through the shadow JAR to prevent classpath issues for users.
