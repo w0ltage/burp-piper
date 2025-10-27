@@ -225,6 +225,20 @@ class MinimalToolWidget(
             showDependenciesField = false,
         ),
     )
+    private val behaviorPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = EmptyBorder(8, 8, 8, 8)
+        isOpaque = false
+    }
+    private val behaviorScrollPane = JScrollPane(behaviorPanel).apply {
+        border = EmptyBorder(0, 0, 0, 0)
+        isOpaque = false
+        viewport.isOpaque = false
+    }
+    private var behaviorTabAdded = false
+    private val passHeadersCheckBox: JCheckBox? = if (showPassHeaders) {
+        JCheckBox("Pass HTTP headers to command")
+    } else null
     private val tabs = JTabbedPane()
     private val overviewSummary = MinimalToolSummaryPanel()
     private val dirtyListeners = mutableListOf<() -> Unit>()
@@ -240,6 +254,18 @@ class MinimalToolWidget(
         )
         commandEditor.display(tool.cmd)
         filterPanel?.display(tool.filter)
+
+        passHeadersCheckBox?.let { checkbox ->
+            checkbox.isSelected = commandEditor.passHeaders()
+            checkbox.alignmentX = Component.LEFT_ALIGNMENT
+            checkbox.addActionListener {
+                commandEditor.setPassHeaders(checkbox.isSelected)
+            }
+            addBehaviorComponent(checkbox, spacing = 0)
+            addBehaviorComponent(JLabel(PASS_HTTP_HEADERS_NOTE).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+            }, spacing = 4)
+        }
 
         val container = JPanel(BorderLayout())
         container.add(header, BorderLayout.NORTH)
@@ -345,6 +371,17 @@ class MinimalToolWidget(
         commandEditor.addChangeListener(listener)
     }
 
+    fun addBehaviorComponent(component: Component, spacing: Int = if (behaviorPanel.componentCount == 0) 0 else 8) {
+        val target = ensureBehaviorTab()
+        if (spacing > 0) {
+            target.add(Box.createVerticalStrut(spacing))
+        }
+        if (component is JComponent) {
+            component.alignmentX = Component.LEFT_ALIGNMENT
+        }
+        target.add(component)
+    }
+
     fun addCustomTab(title: String, component: Component) {
         tabs.addTab(title, component)
     }
@@ -379,6 +416,14 @@ class MinimalToolWidget(
             filterDescription = filterSummary,
             commandDescription = commandLine,
         )
+    }
+
+    private fun ensureBehaviorTab(): JPanel {
+        if (!behaviorTabAdded) {
+            tabs.addTab("Behavior", behaviorScrollPane)
+            behaviorTabAdded = true
+        }
+        return behaviorPanel
     }
 }
 

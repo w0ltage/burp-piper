@@ -585,7 +585,8 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
         container.add(buildSpinnerRow("Maximum allowed number of selected items (0 = no limit):", maxInputsSpinner))
         container.add(Box.createVerticalGlue())
 
-        minimalToolWidget()?.addCustomTab("Behavior", JScrollPane(container))
+        container.alignmentX = Component.LEFT_ALIGNMENT
+        minimalToolWidget()?.addBehaviorComponent(container)
     }
 
     override fun buildUpdatedValue(original: Piper.UserActionTool, common: Piper.MinimalTool): Piper.UserActionTool {
