@@ -2,7 +2,6 @@ package burp
 
 import burp.Piper.CommandInvocation
 
-const val GENERATOR_TAG_PREFIX = "@tag:"
 private const val TYPE_METADATA_PREFIX = "@type="
 
 enum class ParameterInputType {
@@ -17,23 +16,8 @@ data class GeneratorParameterMetadata(
     val description: String,
 )
 
-fun CommandInvocation.extractTags(): List<String> =
-    requiredInPathList.filter { it.startsWith(GENERATOR_TAG_PREFIX) }
-        .map { it.removePrefix(GENERATOR_TAG_PREFIX) }
-
 fun CommandInvocation.extractDependencies(): List<String> =
-    requiredInPathList.filterNot { it.startsWith(GENERATOR_TAG_PREFIX) }
-
-fun mergeDependenciesAndTags(
-    dependencies: List<String>,
-    tags: List<String>,
-): List<String> {
-    if (tags.isEmpty()) {
-        return dependencies
-    }
-    val tagEntries = tags.filter { it.isNotBlank() }.map { GENERATOR_TAG_PREFIX + it.trim() }
-    return dependencies + tagEntries
-}
+    requiredInPathList
 
 fun decodeParameterMetadata(rawDescription: String?): GeneratorParameterMetadata {
     if (rawDescription.isNullOrEmpty()) {

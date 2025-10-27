@@ -51,20 +51,17 @@ class WorkspaceDocumentListener(private val handler: () -> Unit) : DocumentListe
 data class WorkspaceHeaderValues<T>(
     val name: String,
     val enabled: Boolean,
-    val tags: List<String>,
     val template: T?,
 )
 
 open class WorkspaceHeaderPanel<T>(
     private val templateLabel: String,
     private val onChange: () -> Unit,
-    private val includeTagsField: Boolean = true,
     private val includeTemplateField: Boolean = true,
 ) : JPanel(GridBagLayout()) {
 
     val nameField = JTextField()
     val enabledToggle = JToggleButton("Enabled")
-    val tagsField = JTextField()
     val templateCombo = JComboBox<T>()
 
     private var templateRowIndex = -1
@@ -79,12 +76,6 @@ open class WorkspaceHeaderPanel<T>(
         addComponent(nameField, gridx = 1, gridy = row, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
         addComponent(enabledToggle, gridx = 2, gridy = row)
 
-        if (includeTagsField) {
-            row++
-            addLabel("Tags", 0, row)
-            addComponent(tagsField, gridx = 1, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
-        }
-
         if (includeTemplateField) {
             row++
             templateRowIndex = row
@@ -93,9 +84,6 @@ open class WorkspaceHeaderPanel<T>(
         }
 
         nameField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        if (includeTagsField) {
-            tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        }
         enabledToggle.addActionListener { onChange() }
         if (includeTemplateField) {
             templateCombo.addActionListener {
@@ -125,9 +113,6 @@ open class WorkspaceHeaderPanel<T>(
     fun setFieldsEnabled(enabled: Boolean) {
         nameField.isEnabled = enabled
         enabledToggle.isEnabled = enabled
-        if (includeTagsField) {
-            tagsField.isEnabled = enabled
-        }
         if (includeTemplateField) {
             templateCombo.isEnabled = enabled
         }
@@ -136,20 +121,12 @@ open class WorkspaceHeaderPanel<T>(
     fun readValues(): WorkspaceHeaderValues<T> = WorkspaceHeaderValues(
         name = nameField.text,
         enabled = enabledToggle.isSelected,
-        tags = if (includeTagsField) {
-            tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-        } else {
-            emptyList()
-        },
         template = if (includeTemplateField) templateCombo.selectedItem as? T else null,
     )
 
     fun setValues(values: WorkspaceHeaderValues<T>) {
         nameField.text = values.name
         enabledToggle.isSelected = values.enabled
-        if (includeTagsField) {
-            tagsField.text = values.tags.joinToString(", ")
-        }
         if (includeTemplateField) {
             withTemplateChangeSuppressed {
                 when {
@@ -712,7 +689,6 @@ data class WorkspaceCommandState(
     val command: Piper.CommandInvocation,
     val usesAnsi: Boolean = false,
     val dependencies: List<String> = emptyList(),
-    val tags: List<String> = emptyList(),
 )
 
 class WorkspaceCommandPanel(
@@ -721,9 +697,7 @@ class WorkspaceCommandPanel(
     private val purpose: CommandInvocationPurpose = CommandInvocationPurpose.SELF_FILTER,
     private val showAnsiCheckbox: Boolean = true,
     private val showDependenciesField: Boolean = true,
-    private val showTagsField: Boolean = true,
     private val dependenciesLabelText: String = "Binaries required in PATH (comma separated)",
-    private val tagsLabelText: String = "Command tags (comma separated)",
 ) : JPanel(BorderLayout()) {
 
     private val commandEditor = CommandInvocationEditor(
@@ -738,7 +712,6 @@ class WorkspaceCommandPanel(
     )
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
-    private val tagsField = if (showTagsField) JTextField() else null
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -769,14 +742,6 @@ class WorkspaceCommandPanel(
             field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
         }
 
-        tagsField?.let { field ->
-            cs.gridy++
-            content.add(JLabel(tagsLabelText), cs)
-            cs.gridy++
-            content.add(field, cs)
-            field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        }
-
         commandEditor.addChangeListener { onChange() }
 
         val scroll = JScrollPane(content)
@@ -788,7 +753,6 @@ class WorkspaceCommandPanel(
         commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
         ansiCheck?.isSelected = state?.usesAnsi ?: false
         dependenciesField?.text = state?.dependencies?.joinToString(", ") ?: ""
-        tagsField?.text = state?.tags?.joinToString(", ") ?: ""
     }
 
     fun snapshot(): WorkspaceCommandState {
@@ -799,15 +763,10 @@ class WorkspaceCommandPanel(
             ?.split(',')
             ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
             ?: emptyList()
-        val tags = tagsField?.text
-            ?.split(',')
-            ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-            ?: emptyList()
         return WorkspaceCommandState(
             command = command,
             usesAnsi = ansiCheck?.isSelected ?: false,
             dependencies = dependencies,
-            tags = tags,
         )
     }
 

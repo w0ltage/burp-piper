@@ -35,7 +35,9 @@ import javax.swing.event.DocumentListener
 import javax.swing.event.ListDataEvent
 import javax.swing.event.ListDataListener
 
-private data class ViewerTemplateOption(val id: String?, val label: String, val description: String)
+private data class ViewerTemplateOption(val id: String?, val label: String, val description: String) {
+    override fun toString(): String = label
+}
 
 private data class ViewerEditorState(
     var modelIndex: Int? = null,
@@ -45,7 +47,6 @@ private data class ViewerEditorState(
     var command: Piper.CommandInvocation = Piper.CommandInvocation.getDefaultInstance(),
     var filter: Piper.MessageMatch? = null,
     var usesColors: Boolean = false,
-    var tags: MutableList<String> = mutableListOf(),
     var dependencies: MutableList<String> = mutableListOf(),
     var templateId: String? = null,
     var overwrite: Boolean = false,
@@ -55,7 +56,6 @@ private data class ViewerEditorState(
 private fun Piper.MessageViewer.toEditorState(index: Int): ViewerEditorState {
     val minimal = this.common
     val command = minimal.cmd
-    val tags = command.extractTags().toMutableList()
     val dependencies = command.extractDependencies().toMutableList()
     return ViewerEditorState(
         modelIndex = index,
@@ -65,7 +65,6 @@ private fun Piper.MessageViewer.toEditorState(index: Int): ViewerEditorState {
         command = command,
         filter = minimal.filter,
         usesColors = this.usesColors,
-        tags = tags,
         dependencies = dependencies,
     )
 }
@@ -73,7 +72,6 @@ private fun Piper.MessageViewer.toEditorState(index: Int): ViewerEditorState {
 private fun Piper.Commentator.toEditorState(index: Int): ViewerEditorState {
     val minimal = this.common
     val command = minimal.cmd
-    val tags = command.extractTags().toMutableList()
     val dependencies = command.extractDependencies().toMutableList()
     return ViewerEditorState(
         modelIndex = index,
@@ -82,7 +80,6 @@ private fun Piper.Commentator.toEditorState(index: Int): ViewerEditorState {
         scope = minimal.scope,
         command = command,
         filter = minimal.filter,
-        tags = tags,
         dependencies = dependencies,
         overwrite = this.overwrite,
         applyWithListener = this.applyWithListener,
@@ -97,7 +94,7 @@ private fun ViewerEditorState.toMessageViewer(): Piper.MessageViewer {
         this@toMessageViewer.filter?.let { filter = it }
         cmd = this@toMessageViewer.command.toBuilder()
             .clearRequiredInPath()
-            .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
+            .addAllRequiredInPath(dependencies)
             .build()
     }.build()
     return Piper.MessageViewer.newBuilder().apply {
@@ -114,7 +111,7 @@ private fun ViewerEditorState.toCommentator(): Piper.Commentator {
         this@toCommentator.filter?.let { filter = it }
         cmd = this@toCommentator.command.toBuilder()
             .clearRequiredInPath()
-            .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
+            .addAllRequiredInPath(dependencies)
             .build()
     }.build()
     return Piper.Commentator.newBuilder().apply {
@@ -128,7 +125,6 @@ private fun ViewerEditorState.toCommandState(): WorkspaceCommandState = Workspac
     command = command,
     usesAnsi = usesColors,
     dependencies = dependencies,
-    tags = tags,
 )
 
 private class ViewerListModel<T>(
@@ -173,12 +169,7 @@ private class ViewerListModel<T>(
 
     private fun matches(tool: Piper.MinimalTool): Boolean {
         if (query.isBlank()) return true
-        val tags = tool.cmd.extractTags()
-        val haystack = buildString {
-            append(tool.name.lowercase())
-            append(' ')
-            append(tags.joinToString(" ") { it.lowercase() })
-        }
+        val haystack = tool.name.lowercase()
         return haystack.contains(query)
     }
 
@@ -202,9 +193,7 @@ private class ViewerListRenderer<T>(
         val tool = value?.let { extractor(it as T) }
         if (tool != null) {
             val status = if (tool.enabled) "Enabled" else "Disabled"
-            val tags = tool.cmd.extractTags()
-            val suffix = if (tags.isEmpty()) "" else " – " + tags.joinToString(", ")
-            text = tool.name + " [$status]" + suffix
+            text = tool.name + " [$status]"
         }
         return component
     }
@@ -215,9 +204,6 @@ private fun renderViewerOverview(state: ViewerEditorState): String = buildString
     appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
     appendLine("Scope: ${state.scope.name.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)}")
     appendLine("Command: ${state.command.commandLine}")
-    if (state.tags.isNotEmpty()) {
-        appendLine("Tags: ${state.tags.joinToString(", ")}")
-    }
     if (state.dependencies.isNotEmpty()) {
         appendLine("Required binaries: ${state.dependencies.joinToString(", ")}")
     }
@@ -257,7 +243,6 @@ private class ViewerHeaderPanel(
             WorkspaceHeaderValues(
                 name = state?.name.orEmpty(),
                 enabled = state?.enabled ?: false,
-                tags = state?.tags ?: emptyList(),
                 template = templateCombo.selectedItem as? ViewerTemplateOption,
             ),
         )
@@ -270,7 +255,6 @@ private class ViewerHeaderPanel(
         return HeaderSnapshot(
             name = values.name,
             enabled = values.enabled,
-            tags = values.tags,
             templateId = selectedTemplate?.id,
             scope = (scopeCombo.selectedItem as ScopeOption).scope,
         )
@@ -302,7 +286,6 @@ private class ViewerHeaderPanel(
 private data class HeaderSnapshot(
     val name: String,
     val enabled: Boolean,
-    val tags: List<String>,
     val templateId: String?,
     val scope: Piper.MinimalTool.Scope,
 )
@@ -391,7 +374,7 @@ class MessageViewerWorkspacePanel(
         })
         list.componentPopupMenu = createContextMenu()
 
-        searchField.toolTipText = "Search by name or tag"
+        searchField.toolTipText = "Search by name"
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent?) = applyFilter()
             override fun removeUpdate(e: DocumentEvent?) = applyFilter()
@@ -492,7 +475,6 @@ class MessageViewerWorkspacePanel(
         val current = currentState ?: ViewerEditorState()
         current.name = snapshot.name.trim()
         current.enabled = header.enabledToggle.isSelected
-        current.tags = commandSnapshot.tags.toMutableList()
         current.dependencies = commandSnapshot.dependencies.toMutableList()
         current.scope = snapshot.scope
         current.command = commandSnapshot.command
@@ -661,7 +643,7 @@ class CommentatorWorkspacePanel(
         })
         list.componentPopupMenu = createContextMenu()
 
-        searchField.toolTipText = "Search by name or tag"
+        searchField.toolTipText = "Search by name"
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent?) = applyFilter()
             override fun removeUpdate(e: DocumentEvent?) = applyFilter()
@@ -768,7 +750,6 @@ class CommentatorWorkspacePanel(
         val state = currentState ?: ViewerEditorState()
         state.name = snapshot.name.trim()
         state.enabled = snapshot.enabled
-        state.tags = commandSnapshot.tags.toMutableList()
         state.dependencies = commandSnapshot.dependencies.toMutableList()
         state.command = commandSnapshot.command
         state.usesColors = commandTab.isAnsiSelected()

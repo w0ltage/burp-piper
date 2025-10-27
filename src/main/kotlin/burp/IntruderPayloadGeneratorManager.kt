@@ -61,7 +61,6 @@ data class GeneratorEditorState(
     var modelIndex: Int? = null,
     var name: String = "",
     var enabled: Boolean = true,
-    var tags: MutableList<String> = mutableListOf(),
     var templateId: String? = null,
     var commandTokens: MutableList<String> = mutableListOf("/usr/bin/env"),
     var inputMethod: Piper.CommandInvocation.InputMethod = Piper.CommandInvocation.InputMethod.STDIN,
@@ -87,9 +86,6 @@ private data class TemplateOption(val id: String?, val label: String) {
 private fun renderGeneratorOverview(state: GeneratorEditorState): String = buildString {
     appendLine("Name: ${state.name.ifBlank { "(unnamed)" }}")
     appendLine("Status: ${if (state.enabled) "Enabled" else "Disabled"}")
-    if (state.tags.isNotEmpty()) {
-        appendLine("Tags: ${state.tags.joinToString(", ")}")
-    }
     appendLine("Command: ${state.commandTokens.joinToString(" ")}")
     appendLine("Input method: ${state.inputMethod.name}")
     if (state.parameters.isNotEmpty()) {
@@ -135,7 +131,6 @@ private object GeneratorTemplates {
                     description = "Domain to embed in generated payloads.",
                 ),
             )
-            state.tags = mutableListOf("ssrf", "collaborator")
             state.dependencies = mutableListOf("/usr/local/bin/ssrf-gen")
         },
         GeneratorTemplate(
@@ -150,7 +145,6 @@ private object GeneratorTemplates {
             )
             state.inputMethod = Piper.CommandInvocation.InputMethod.STDIN
             state.parameters.clear()
-            state.tags = mutableListOf("encoding", "base64")
             state.dependencies = mutableListOf("/usr/bin/python3")
         },
         GeneratorTemplate(
@@ -174,7 +168,6 @@ private object GeneratorTemplates {
                     description = "Absolute path to the wordlist consumed by John.",
                 ),
             )
-            state.tags = mutableListOf("passwords", "john")
             state.dependencies = mutableListOf("/usr/local/bin/john")
         },
     )
@@ -192,7 +185,6 @@ private object GeneratorTemplates {
             target.commandTokens = state.commandTokens.map { it }.toMutableList()
             target.inputMethod = state.inputMethod
             target.parameters = state.parameters.map { it.copy() }.toMutableList()
-            target.tags = state.tags.map { it }.toMutableList()
             target.exitCodes = state.exitCodes.map { it }.toMutableList()
             target.dependencies = state.dependencies.map { it }.toMutableList()
             target.passHeaders = state.passHeaders
@@ -230,7 +222,7 @@ class IntruderPayloadGeneratorManagerPanel(
         })
         generatorList.componentPopupMenu = createContextMenu()
 
-        searchField.toolTipText = "Search by name or tag"
+        searchField.toolTipText = "Search by name"
         searchField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent?) = applyFilter()
             override fun removeUpdate(e: DocumentEvent?) = applyFilter()
@@ -384,9 +376,7 @@ private class GeneratorListRenderer : DefaultListCellRenderer() {
         val tool = value as? Piper.MinimalTool
         if (tool != null) {
             val status = if (tool.enabled) "Enabled" else "Disabled"
-            val tags = tool.cmd.extractTags()
-            val tagSuffix = if (tags.isEmpty()) "" else " – " + tags.joinToString(", ")
-            text = tool.name + " [$status]" + tagSuffix
+            text = tool.name + " [$status]"
         }
         return component
     }
@@ -438,13 +428,7 @@ private class FilteredGeneratorListModel(
 
     private fun matches(tool: Piper.MinimalTool): Boolean {
         if (query.isBlank()) return true
-        val tags = tool.cmd.extractTags()
-        val haystack = buildString {
-            append(tool.name.lowercase())
-            append(' ')
-            append(tags.joinToString(" ") { it.lowercase() })
-        }
-        return haystack.contains(query)
+        return tool.name.lowercase().contains(query)
     }
 
     override fun intervalAdded(e: ListDataEvent?) = rebuild()
@@ -487,8 +471,6 @@ private class GeneratorEditorPanel(
             validationTab.updateParameterInputs(parametersTab.parameters)
         }
         header.nameField.columns = 24
-        header.tagsField.toolTipText = "Comma separated tags"
-        header.tagsField.columns = 18
         header.templateCombo.addActionListener {
             if (!loading) {
                 applyTemplate(header.templateCombo.selectedItem as? TemplateOption)
@@ -530,7 +512,6 @@ private class GeneratorEditorPanel(
                 WorkspaceHeaderValues(
                     name = newState?.name.orEmpty(),
                     enabled = newState?.enabled ?: false,
-                    tags = newState?.tags ?: emptyList(),
                     template = selectedTemplate,
                 ),
             )
@@ -591,7 +572,6 @@ private class GeneratorEditorPanel(
         val headerValues = header.readValues()
         current.name = headerValues.name.trim()
         current.enabled = headerValues.enabled
-        current.tags = headerValues.tags.toMutableList()
         current.templateId = headerValues.template?.id
         current.commandTokens = commandTab.tokens().toMutableList()
         val paramStates = parametersTab.parameters
@@ -839,7 +819,6 @@ private fun Piper.MinimalTool.toEditorState(index: Int? = null): GeneratorEditor
     state.modelIndex = index
     state.name = name
     state.enabled = enabled
-    state.tags = cmd.extractTags().toMutableList()
     state.commandTokens = cmd.buildTokenList()
     state.inputMethod = cmd.inputMethod
     state.parameters = cmd.parameterList.map { it.toParameterState() }.toMutableList()
@@ -861,7 +840,7 @@ private fun GeneratorEditorState.toMinimalTool(): Piper.MinimalTool {
         .addAllPostfix(commandTokens.postfixTokens(inputMethod))
         .addAllExitCode(exitCodes)
         .addAllParameter(parameters.map { it.toProtoParameter() })
-        .addAllRequiredInPath(mergeDependenciesAndTags(dependencies, tags))
+        .addAllRequiredInPath(dependencies)
     builder.cmd = commandBuilder.build()
     return builder.build()
 }
@@ -870,7 +849,6 @@ private fun GeneratorEditorState.deepCopy(): GeneratorEditorState {
     copy.modelIndex = modelIndex
     copy.name = name
     copy.enabled = enabled
-    copy.tags = tags.map { it }.toMutableList()
     copy.templateId = templateId
     copy.commandTokens = commandTokens.map { it }.toMutableList()
     copy.inputMethod = inputMethod

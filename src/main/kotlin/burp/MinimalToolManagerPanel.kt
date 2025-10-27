@@ -117,13 +117,7 @@ private class FilteredMinimalToolListModel<T>(
     private fun matches(value: T): Boolean {
         if (query.isBlank()) return true
         val tool = extractor(value)
-        val tags = tool.cmd.extractTags()
-        val haystack = buildString {
-            append(tool.name.lowercase())
-            append(' ')
-            append(tags.joinToString(" ") { it.lowercase() })
-        }
-        return haystack.contains(query)
+        return tool.name.lowercase().contains(query)
     }
 
     override fun intervalAdded(e: ListDataEvent?) = rebuild()
@@ -145,9 +139,7 @@ private class MinimalToolListCellRenderer<T>(
         val tool = value?.let { extractor(it as T) }
         if (tool != null) {
             val status = if (tool.enabled) "Enabled" else "Disabled"
-            val tags = tool.cmd.extractTags()
-            val tagSuffix = if (tags.isEmpty()) "" else " – " + tags.joinToString(", ")
-            text = tool.name + " [$status]" + tagSuffix
+            text = tool.name + " [$status]"
         }
         return component
     }
@@ -321,7 +313,7 @@ private class MinimalToolManagerPanel<T>(
 
         editor.setDirtyListener { markDirty() }
 
-        searchField.toolTipText = "Search by name or tag"
+        searchField.toolTipText = "Search by name"
         searchField.document.addDocumentListener(SimpleDocumentCallback { applyFilter() })
 
         val leftPanel = JPanel(BorderLayout()).apply {

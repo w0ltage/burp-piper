@@ -205,7 +205,6 @@ class MinimalToolWidget(
     private val header = WorkspaceHeaderPanel<Unit>(
         templateLabel = "Template",
         onChange = { onHeaderChanged() },
-        includeTagsField = false,
         includeTemplateField = false,
     )
     private val scopeCombo: JComboBox<ConfigMinimalToolScope>? = if (showScope) {
@@ -250,7 +249,6 @@ class MinimalToolWidget(
             WorkspaceHeaderValues(
                 name = tool.name,
                 enabled = tool.enabled,
-                tags = emptyList(),
                 template = null,
             ),
         )
