@@ -236,9 +236,11 @@ class MinimalToolWidget(
         viewport.isOpaque = false
     }
     private var behaviorTabAdded = false
-    private val passHeadersCheckBox: JCheckBox? = if (showPassHeaders) {
-        JCheckBox("Pass HTTP headers to command")
+    private val passHeadersControls: PassHeadersControls? = if (showPassHeaders) {
+        createPassHeadersControls(commandEditor.passHeaders(), commandEditor::setPassHeaders)
     } else null
+    @Suppress("unused")
+    private val passHeadersCheckBox: JCheckBox? = passHeadersControls?.checkbox
     private val tabs = JTabbedPane()
     private val overviewSummary = MinimalToolSummaryPanel()
     private val dirtyListeners = mutableListOf<() -> Unit>()
@@ -255,16 +257,9 @@ class MinimalToolWidget(
         commandEditor.display(tool.cmd)
         filterPanel?.display(tool.filter)
 
-        passHeadersCheckBox?.let { checkbox ->
-            checkbox.isSelected = commandEditor.passHeaders()
-            checkbox.alignmentX = Component.LEFT_ALIGNMENT
-            checkbox.addActionListener {
-                commandEditor.setPassHeaders(checkbox.isSelected)
-            }
-            addBehaviorComponent(checkbox, spacing = 0)
-            addBehaviorComponent(JLabel(PASS_HTTP_HEADERS_NOTE).apply {
-                alignmentX = Component.LEFT_ALIGNMENT
-            }, spacing = 4)
+        passHeadersControls?.let { controls ->
+            addBehaviorComponent(controls.checkbox, spacing = 0)
+            addBehaviorComponent(controls.note, spacing = 4)
         }
 
         val container = JPanel(BorderLayout())
@@ -863,13 +858,37 @@ data class CommandLineParameter(val value: String?) { // null = input file name
 const val PASS_HTTP_HEADERS_NOTE = "<html>Note: if the above checkbox is <font color='red'>unchecked</font>, messages without a body (such as<br>" +
         "GET/HEAD requests or 204 No Content responses) are <font color='red'>ignored by this tool</font>.</html>"
 
+private data class PassHeadersControls(
+    val checkbox: JCheckBox,
+    val note: JLabel,
+)
+
+private fun createPassHeadersControls(
+    initialValue: Boolean,
+    onToggle: (Boolean) -> Unit,
+): PassHeadersControls {
+    val checkbox = JCheckBox("Pass HTTP headers to command").apply {
+        alignmentX = Component.LEFT_ALIGNMENT
+        isSelected = initialValue
+        addActionListener { onToggle(isSelected) }
+    }
+    val note = JLabel(PASS_HTTP_HEADERS_NOTE).apply {
+        alignmentX = Component.LEFT_ALIGNMENT
+    }
+    return PassHeadersControls(checkbox, note)
+}
+
 class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: CommandInvocationPurpose, parent: Component,
                               showPassHeaders: Boolean) : ConfigDialog<Piper.CommandInvocation>(parent, "Command invocation editor") {
     private val ccmwStdout = CollapsedMessageMatchWidget(this, mm = ci.stdout, showHeaderMatch = false, caption = "Match on stdout: ")
     private val ccmwStderr = CollapsedMessageMatchWidget(this, mm = ci.stderr, showHeaderMatch = false, caption = "Match on stderr: ")
     private val monospaced12 = Font("monospaced", Font.PLAIN, 12)
     private var tfExitCode: JTextField? = null
+    private val passHeadersControls: PassHeadersControls? = if (showPassHeaders) {
+        createPassHeadersControls(ci.passHeaders) { }
+    } else null
     private val cbPassHeaders: JCheckBox?
+        get() = passHeadersControls?.checkbox
     private val tfDependencies = JTextField()
 
     private val hasFileName = ci.inputMethod == Piper.CommandInvocation.InputMethod.FILENAME
@@ -1004,11 +1023,10 @@ class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: 
 
         addFullWidthComponent(parameterEditor, panel, cs)
 
-        cbPassHeaders = if (showPassHeaders) {
-            val cb = createFullWidthCheckBox("Pass HTTP headers to command", ci.passHeaders, panel, cs)
-            addFullWidthComponent(JLabel(PASS_HTTP_HEADERS_NOTE), panel, cs)
-            cb
-        } else null
+        passHeadersControls?.let { controls ->
+            addFullWidthComponent(controls.checkbox, panel, cs)
+            addFullWidthComponent(controls.note, panel, cs)
+        }
 
         addFullWidthComponent(JLabel("Binaries required in PATH: (comma separated)"), panel, cs)
         addFullWidthComponent(tfDependencies, panel, cs)

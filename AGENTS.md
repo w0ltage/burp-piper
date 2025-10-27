@@ -14,7 +14,7 @@ Piper integrates external tools and their pipelines to Burp Suite. The extension
 - HTTP Listeners: Transform outgoing and incoming HTTP messages. For example, you can use an external Python script to handle custom encryption.
 
 ## Build & Packaging
-- Always build with `./gradlew --no-daemon --console=plain clean shadowJar` so the bundled artifact includes the Kotlin runtime.
+- Run `./gradlew --no-daemon --console=plain build` before finishing work so unit tests and proto generation stay in sync. (The project does not currently define a `shadowJar` task.)
 - The distributable lives at `build/libs/auto-file-checker-<version>.jar`. Use this JAR when loading the extension into Burp Suite.
 - The plain `jar` task is disabled; do not re-enable it unless you provide an alternative way to supply the Kotlin stdlib.
 
@@ -24,6 +24,10 @@ Piper integrates external tools and their pipelines to Burp Suite. The extension
 - Prefer immutable collections from `kotlin.collections` unless mutation is required for Montoya callbacks.
 - Use coroutines only if you wire them into Montoya's threading expectations; current async work relies on Java executors via Kotlin interop.
 - Keep UI code on the Swing EDT by wrapping updates with `SwingUtilities.invokeLater { ... }`.
+
+### Pass-headers behaviour widgets
+- Use `createPassHeadersControls` (in `ConfigGUI.kt`) when exposing the “Pass HTTP headers to command” toggle so the checkbox and explanatory note remain consistent across inline editors and dialogs.
+- When the input tab is hidden, call `CommandInvocationEditor.setPassHeaders` directly to preserve the stored state.
 
 ## Montoya API Access
 Because direct MCP access is unavailable, fetch Montoya API documentation via HTTP GET requests to Context7 when you need clarification.
