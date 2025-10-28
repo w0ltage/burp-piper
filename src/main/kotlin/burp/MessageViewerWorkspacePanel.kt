@@ -382,6 +382,13 @@ class MessageViewerWorkspacePanel(
             override fun changedUpdate(e: DocumentEvent?) = applyFilter()
         })
 
+        filterTab.addChangeListener { filter ->
+            if (!loading) {
+                currentState = currentState?.also { it.filter = filter }
+                currentState?.let { overview.display(it) }
+            }
+        }
+
         val left = JPanel(BorderLayout())
         left.border = EmptyBorder(8, 8, 8, 8)
         val searchRow = JPanel(BorderLayout(4, 4))

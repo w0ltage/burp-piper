@@ -4,9 +4,8 @@ import java.awt.Component
 import javax.swing.JCheckBox
 import javax.swing.JLabel
 
-const val PASS_HTTP_HEADERS_NOTE = "<html>Note: if the above checkbox is <font color='red'>unchecked</font>, messages without a" +
-    " body (such as<br>" +
-    "GET/HEAD requests or 204 No Content responses) are <font color='red'>ignored by this tool</font>.</html>"
+const val PASS_HTTP_HEADERS_NOTE = "Note: if the above checkbox is unchecked, messages without a body (such as\n" +
+    "GET/HEAD requests or 204 No Content responses) are ignored by this tool."
 
 data class PassHeadersControls(
     val checkbox: JCheckBox,
