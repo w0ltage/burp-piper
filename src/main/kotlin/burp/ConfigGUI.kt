@@ -1192,10 +1192,13 @@ fun <E : Component> addFullWidthComponent(c: E, panel: Container, cs: GridBagCon
     return c
 }
 
-class HexASCIITextField(private val tf: JTextField = JTextField(),
-                        private val rbHex: JRadioButton = JRadioButton("Hex"),
-                        private val rbASCII: JRadioButton = JRadioButton("ASCII"),
-                        private val field: String, private var isASCII: Boolean) {
+class HexASCIITextField(
+    private val tf: JTextField = JTextField(),
+    private val rbHex: JRadioButton = JRadioButton("Hex"),
+    private val rbASCII: JRadioButton = JRadioButton("ASCII"),
+    private val field: String,
+    private var isASCII: Boolean,
+) {
 
     constructor(field: String, source: ByteString, dialog: Component) : this(field=field, isASCII=source.isValidUtf8) {
         if (isASCII) {
@@ -1207,6 +1210,8 @@ class HexASCIITextField(private val tf: JTextField = JTextField(),
         }
 
         with(ButtonGroup()) { add(rbHex); add(rbASCII); }
+
+        tf.columns = 28
 
         rbASCII.addActionListener {
             if (isASCII) return@addActionListener
@@ -1244,10 +1249,30 @@ class HexASCIITextField(private val tf: JTextField = JTextField(),
 
     fun addWidgets(caption: String, cs: GridBagConstraints, panel: Container) {
         cs.gridy++
-        cs.gridx = 0 ; panel.add(JLabel(caption), cs)
-        cs.gridx = 1 ; panel.add(tf,      cs)
-        cs.gridx = 2 ; panel.add(rbASCII, cs)
-        cs.gridx = 3 ; panel.add(rbHex,   cs)
+
+        val previousFill = cs.fill
+        val previousWeightX = cs.weightx
+
+        cs.gridwidth = 1
+        cs.gridx = 0
+        cs.fill = GridBagConstraints.HORIZONTAL
+        cs.weightx = 0.0
+        panel.add(JLabel(caption), cs)
+
+        cs.gridx = 1
+        cs.weightx = 1.0
+        panel.add(tf, cs)
+
+        cs.weightx = 0.0
+        cs.fill = previousFill
+
+        cs.gridx = 2
+        panel.add(rbASCII, cs)
+        cs.gridx = 3
+        panel.add(rbHex, cs)
+
+        cs.fill = previousFill
+        cs.weightx = previousWeightX
     }
 
     fun setValue(source: ByteString) {
