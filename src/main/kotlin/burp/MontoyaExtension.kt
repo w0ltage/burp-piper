@@ -595,8 +595,11 @@ class MontoyaExtension : BurpExtension {
                         flushBuffer(buffer, textPane)
                         break
                     }
-                    buffer.append(codePoint.toChar())
-                    if (buffer.length >= 256 || !reader.ready()) {
+                    val ch = codePoint.toChar()
+                    buffer.append(ch)
+                    val shouldFlush = ch == '\n' || ch == '\r' ||
+                        buffer.length >= 256 || !reader.ready()
+                    if (shouldFlush) {
                         flushBuffer(buffer, textPane)
                     }
                 }
