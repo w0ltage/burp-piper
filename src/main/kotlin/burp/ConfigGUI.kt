@@ -820,8 +820,30 @@ fun <E> createLabeledComboBox(caption: String, initialValue: String, panel: Cont
 
 fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Container, cs: GridBagConstraints): T {
     cs.gridy++
-    cs.gridwidth = 1 ; cs.gridx = 0 ; panel.add(JLabel(caption), cs)
-    cs.gridwidth = 3 ; cs.gridx = 1 ; panel.add(widget, cs)
+
+    val previousFill = cs.fill
+    val previousWeightX = cs.weightx
+    val previousAnchor = cs.anchor
+
+    cs.gridwidth = 1
+    cs.gridx = 0
+    cs.fill = GridBagConstraints.HORIZONTAL
+    cs.weightx = 0.0
+    cs.anchor = GridBagConstraints.EAST
+    val label = JLabel(caption).apply {
+        horizontalAlignment = SwingConstants.RIGHT
+        if (widget is JComponent) {
+            labelFor = widget
+        }
+    }
+    panel.add(label, cs)
+
+    cs.gridwidth = 3
+    cs.gridx = 1
+    cs.fill = previousFill
+    cs.weightx = previousWeightX
+    cs.anchor = previousAnchor
+    panel.add(widget, cs)
     return widget
 }
 
@@ -1257,7 +1279,11 @@ class HexASCIITextField(
         cs.gridx = 0
         cs.fill = GridBagConstraints.HORIZONTAL
         cs.weightx = 0.0
-        panel.add(JLabel(caption), cs)
+        val label = JLabel(caption).apply {
+            horizontalAlignment = SwingConstants.RIGHT
+            labelFor = tf
+        }
+        panel.add(label, cs)
 
         cs.gridx = 1
         cs.weightx = 1.0
