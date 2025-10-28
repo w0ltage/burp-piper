@@ -362,6 +362,12 @@ class MinimalToolWidget(
         commandPanel.addChangeListener(listener)
     }
 
+    fun passHeaders(): Boolean = commandPanel.passHeaders()
+
+    fun setPassHeaders(value: Boolean) {
+        commandPanel.setPassHeaders(value)
+    }
+
     fun addBehaviorComponent(component: Component, spacing: Int = if (behaviorContent.componentCount == 0) 0 else 8) {
         val target = ensureBehaviorTab()
         if (spacing > 0) {

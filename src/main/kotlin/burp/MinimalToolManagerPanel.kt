@@ -530,7 +530,10 @@ private class MinimalToolManagerPanel<T>(
     override fun lostOwnership(clipboard: java.awt.datatransfer.Clipboard?, contents: Transferable?) {}
 }
 
-private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(parent, MinimalToolEditorConfig()) {
+private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(
+    parent,
+    MinimalToolEditorConfig(showPassHeaders = false),
+) {
     private lateinit var hasGUICheckBox: JCheckBox
     private lateinit var avoidPipeCheckBox: JCheckBox
     private lateinit var minInputsSpinner: JSpinner
@@ -539,6 +542,13 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
     override fun extractCommon(value: Piper.UserActionTool): Piper.MinimalTool = value.common
 
     override fun addCustomFields(value: Piper.UserActionTool, panel: Container, cs: GridBagConstraints) {
+        val passHeadersControls = createPassHeadersControls(value.common.cmd.passHeaders) { selected ->
+            minimalToolWidget()?.setPassHeaders(selected)
+            notifyDirty()
+        }
+        minimalToolWidget()?.addBehaviorComponent(passHeadersControls.checkbox)
+        minimalToolWidget()?.addBehaviorComponent(passHeadersControls.note, spacing = 4)
+
         val container = JPanel()
         container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
         hasGUICheckBox = JCheckBox("Has its own GUI (no need for a console window)", value.hasGUI).apply {
@@ -560,7 +570,7 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
         container.add(Box.createVerticalGlue())
 
         container.alignmentX = Component.LEFT_ALIGNMENT
-        minimalToolWidget()?.addBehaviorComponent(container)
+        minimalToolWidget()?.addBehaviorComponent(container, spacing = 12)
     }
 
     override fun buildUpdatedValue(original: Piper.UserActionTool, common: Piper.MinimalTool): Piper.UserActionTool {

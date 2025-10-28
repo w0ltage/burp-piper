@@ -831,6 +831,22 @@ class WorkspaceCommandPanel(
         )
     }
 
+    fun passHeaders(): Boolean = commandEditor.passHeaders()
+
+    fun setPassHeaders(value: Boolean) {
+        val wasApplying = applyingState
+        applyingState = true
+        try {
+            passHeadersControls?.checkbox?.isSelected = value
+            commandEditor.setPassHeaders(value)
+        } finally {
+            applyingState = wasApplying
+        }
+        if (!wasApplying) {
+            notifyChanged()
+        }
+    }
+
     fun isAnsiSelected(): Boolean = ansiCheck?.isSelected ?: false
 
     private fun notifyChanged() {
