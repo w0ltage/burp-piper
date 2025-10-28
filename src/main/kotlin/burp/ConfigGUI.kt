@@ -824,30 +824,105 @@ fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Conta
     val previousFill = cs.fill
     val previousWeightX = cs.weightx
     val previousAnchor = cs.anchor
+    val previousGridWidth = cs.gridwidth
+    val previousGridX = cs.gridx
 
-    cs.gridwidth = 1
     cs.gridx = 0
+    cs.gridwidth = 4
     cs.fill = GridBagConstraints.HORIZONTAL
-    cs.weightx = 0.0
-    cs.anchor = GridBagConstraints.EAST
+    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
+    cs.anchor = GridBagConstraints.NORTHWEST
+
+    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
     val label = JLabel(caption).apply {
-        horizontalAlignment = SwingConstants.RIGHT
         if (widget is JComponent) {
             labelFor = widget
         }
     }
-    panel.add(label, cs)
+    row.add(label, GridBagConstraints().apply {
+        gridx = 0
+        gridy = 0
+        anchor = GridBagConstraints.WEST
+        insets = Insets(0, 0, 0, 8)
+    })
 
-    cs.gridwidth = 3
-    cs.gridx = 1
-    cs.fill = GridBagConstraints.HORIZONTAL
-    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
-    cs.anchor = GridBagConstraints.WEST
-    panel.add(widget, cs)
+    if (widget is JComponent) {
+        widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
+    }
+    row.add(widget, GridBagConstraints().apply {
+        gridx = 1
+        gridy = 0
+        weightx = 1.0
+        fill = GridBagConstraints.HORIZONTAL
+    })
+
+    panel.add(row, cs)
+
+    cs.gridx = previousGridX
+    cs.gridwidth = previousGridWidth
     cs.fill = previousFill
     cs.weightx = previousWeightX
     cs.anchor = previousAnchor
     return widget
+}
+
+private fun addInlineLabeledRow(
+    caption: String,
+    widget: JComponent,
+    panel: Container,
+    cs: GridBagConstraints,
+    trailing: List<Component> = emptyList(),
+) {
+    cs.gridy++
+
+    val previousFill = cs.fill
+    val previousWeightX = cs.weightx
+    val previousAnchor = cs.anchor
+    val previousGridWidth = cs.gridwidth
+    val previousGridX = cs.gridx
+
+    cs.gridx = 0
+    cs.gridwidth = 4
+    cs.fill = GridBagConstraints.HORIZONTAL
+    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
+    cs.anchor = GridBagConstraints.NORTHWEST
+
+    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
+    val label = JLabel(caption).apply {
+        labelFor = widget
+    }
+    row.add(label, GridBagConstraints().apply {
+        gridx = 0
+        gridy = 0
+        anchor = GridBagConstraints.WEST
+        insets = Insets(0, 0, 0, 8)
+    })
+
+    widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
+    row.add(widget, GridBagConstraints().apply {
+        gridx = 1
+        gridy = 0
+        weightx = 1.0
+        fill = GridBagConstraints.HORIZONTAL
+        insets = Insets(0, 0, 0, if (trailing.isNotEmpty()) 12 else 0)
+    })
+
+    trailing.forEachIndexed { index, component ->
+        row.add(component, GridBagConstraints().apply {
+            gridx = 2 + index
+            gridy = 0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(0, if (index == 0) 0 else 8, 0, 0)
+        })
+    }
+
+    panel.add(row, cs)
+
+    cs.gridx = previousGridX
+    cs.gridwidth = previousGridWidth
+    cs.fill = previousFill
+    cs.weightx = previousWeightX
+    cs.anchor = previousAnchor
 }
 
 class HeaderMatchDialog(hm: Piper.HeaderMatch, parent: Component) : ConfigDialog<Piper.HeaderMatch>(parent, "Header filter editor") {
@@ -1273,41 +1348,7 @@ class HexASCIITextField(
     }
 
     fun addWidgets(caption: String, cs: GridBagConstraints, panel: Container) {
-        cs.gridy++
-
-        val previousFill = cs.fill
-        val previousWeightX = cs.weightx
-        val previousAnchor = cs.anchor
-
-        cs.gridwidth = 1
-        cs.gridx = 0
-        cs.fill = GridBagConstraints.HORIZONTAL
-        cs.weightx = 0.0
-        cs.anchor = GridBagConstraints.EAST
-        val label = JLabel(caption).apply {
-            horizontalAlignment = SwingConstants.RIGHT
-            labelFor = tf
-        }
-        panel.add(label, cs)
-
-        cs.gridx = 1
-        cs.weightx = 1.0
-        cs.fill = GridBagConstraints.HORIZONTAL
-        cs.anchor = GridBagConstraints.WEST
-        panel.add(tf, cs)
-
-        cs.weightx = 0.0
-        cs.fill = previousFill
-        cs.anchor = previousAnchor
-
-        cs.gridx = 2
-        panel.add(rbASCII, cs)
-        cs.gridx = 3
-        panel.add(rbHex, cs)
-
-        cs.fill = previousFill
-        cs.weightx = previousWeightX
-        cs.anchor = previousAnchor
+        addInlineLabeledRow(caption, tf, panel, cs, trailing = listOf(rbASCII, rbHex))
     }
 
     fun setValue(source: ByteString) {
@@ -1341,7 +1382,10 @@ private fun parseHexNibble(c: Char): Int = if (c in '0'..'9') (c - '0')
 else ((c.toLowerCase() - 'a') + 0xA)
 
 class RegExpWidget(regex: Piper.RegularExpression, panel: Container, cs: GridBagConstraints) {
-    private val tfPattern = createLabeledTextField("Matches regular expression: ", regex.pattern, panel, cs)
+    private val tfPattern = JTextField(regex.pattern).apply {
+        columns = 28
+        addInlineLabeledRow("Matches regular expression:", this, panel, cs)
+    }
     private val esw = EnumSetWidget(regex.flagSet, panel, cs, "Regular expression flags: (see JDK documentation)", RegExpFlag::class.java)
 
     fun hasPattern(): Boolean = tfPattern.text.isNotEmpty()
