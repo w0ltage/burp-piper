@@ -51,20 +51,17 @@ class WorkspaceDocumentListener(private val handler: () -> Unit) : DocumentListe
 data class WorkspaceHeaderValues<T>(
     val name: String,
     val enabled: Boolean,
-    val tags: List<String>,
     val template: T?,
 )
 
 open class WorkspaceHeaderPanel<T>(
     private val templateLabel: String,
     private val onChange: () -> Unit,
-    private val includeTagsField: Boolean = true,
     private val includeTemplateField: Boolean = true,
 ) : JPanel(GridBagLayout()) {
 
     val nameField = JTextField()
     val enabledToggle = JToggleButton("Enabled")
-    val tagsField = JTextField()
     val templateCombo = JComboBox<T>()
 
     private var templateRowIndex = -1
@@ -79,12 +76,6 @@ open class WorkspaceHeaderPanel<T>(
         addComponent(nameField, gridx = 1, gridy = row, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
         addComponent(enabledToggle, gridx = 2, gridy = row)
 
-        if (includeTagsField) {
-            row++
-            addLabel("Tags", 0, row)
-            addComponent(tagsField, gridx = 1, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
-        }
-
         if (includeTemplateField) {
             row++
             templateRowIndex = row
@@ -93,9 +84,6 @@ open class WorkspaceHeaderPanel<T>(
         }
 
         nameField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        if (includeTagsField) {
-            tagsField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
-        }
         enabledToggle.addActionListener { onChange() }
         if (includeTemplateField) {
             templateCombo.addActionListener {
@@ -125,9 +113,6 @@ open class WorkspaceHeaderPanel<T>(
     fun setFieldsEnabled(enabled: Boolean) {
         nameField.isEnabled = enabled
         enabledToggle.isEnabled = enabled
-        if (includeTagsField) {
-            tagsField.isEnabled = enabled
-        }
         if (includeTemplateField) {
             templateCombo.isEnabled = enabled
         }
@@ -136,20 +121,12 @@ open class WorkspaceHeaderPanel<T>(
     fun readValues(): WorkspaceHeaderValues<T> = WorkspaceHeaderValues(
         name = nameField.text,
         enabled = enabledToggle.isSelected,
-        tags = if (includeTagsField) {
-            tagsField.text.split(',').mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-        } else {
-            emptyList()
-        },
         template = if (includeTemplateField) templateCombo.selectedItem as? T else null,
     )
 
     fun setValues(values: WorkspaceHeaderValues<T>) {
         nameField.text = values.name
         enabledToggle.isSelected = values.enabled
-        if (includeTagsField) {
-            tagsField.text = values.tags.joinToString(", ")
-        }
         if (includeTemplateField) {
             withTemplateChangeSuppressed {
                 when {
@@ -387,7 +364,13 @@ private class MessageMatchForm(
             insets = Insets(4, 4, 4, 4)
         }
 
+        val previousFill = cs.fill
+        val previousGridWidth = cs.gridwidth
+        cs.gridwidth = 4
+        cs.fill = GridBagConstraints.HORIZONTAL
         add(negationBox, cs)
+        cs.gridwidth = previousGridWidth
+        cs.fill = previousFill
 
         prefixField.addWidgets("Starts with:", cs, this)
         prefixField.addChangeListener { notifyChanged() }
@@ -674,10 +657,17 @@ class WorkspaceFilterPanel(
     private val filterPanel = MessageMatchEditorPanel(parent)
     private val summaryLabel = JLabel("Filter description → (none)")
     private val sampleLabel = JLabel("Matched sample: –")
+    private val listeners = mutableListOf<(Piper.MessageMatch?) -> Unit>()
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
-        add(filterPanel, BorderLayout.CENTER)
+        val scroll = JScrollPane(filterPanel).apply {
+            border = BorderFactory.createEmptyBorder()
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            verticalScrollBar.unitIncrement = 16
+        }
+        add(scroll, BorderLayout.CENTER)
         val footer = JPanel()
         footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
         footer.border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
@@ -690,6 +680,7 @@ class WorkspaceFilterPanel(
         filterPanel.addChangeListener {
             updateSummary()
             onChange()
+            notifyListeners()
         }
     }
 
@@ -700,11 +691,20 @@ class WorkspaceFilterPanel(
 
     fun value(): Piper.MessageMatch? = filterPanel.value()
 
+    fun addChangeListener(listener: (Piper.MessageMatch?) -> Unit) {
+        listeners += listener
+    }
+
     private fun updateSummary() {
         val value = filterPanel.value()
         summaryLabel.text = "Filter description → " +
             (value?.toHumanReadable(negation = false, hideParentheses = true) ?: "(none)")
         sampleLabel.text = "Matched sample: preview unavailable"
+    }
+
+    private fun notifyListeners() {
+        val value = filterPanel.value()
+        listeners.forEach { it(value) }
     }
 }
 
@@ -712,18 +712,17 @@ data class WorkspaceCommandState(
     val command: Piper.CommandInvocation,
     val usesAnsi: Boolean = false,
     val dependencies: List<String> = emptyList(),
-    val tags: List<String> = emptyList(),
+    val passHeaders: Boolean = false,
 )
 
 class WorkspaceCommandPanel(
     parent: Component?,
-    private val onChange: () -> Unit,
+    onChange: (() -> Unit)? = null,
     private val purpose: CommandInvocationPurpose = CommandInvocationPurpose.SELF_FILTER,
     private val showAnsiCheckbox: Boolean = true,
     private val showDependenciesField: Boolean = true,
-    private val showTagsField: Boolean = true,
     private val dependenciesLabelText: String = "Binaries required in PATH (comma separated)",
-    private val tagsLabelText: String = "Command tags (comma separated)",
+    private val showPassHeadersToggle: Boolean = false,
 ) : JPanel(BorderLayout()) {
 
     private val commandEditor = CommandInvocationEditor(
@@ -738,7 +737,18 @@ class WorkspaceCommandPanel(
     )
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
-    private val tagsField = if (showTagsField) JTextField() else null
+    private val listeners = mutableListOf<() -> Unit>().apply { onChange?.let(::add) }
+    private var applyingState = false
+    private val passHeadersControls = if (showPassHeadersToggle) {
+        createPassHeadersControls(commandEditor.passHeaders()) { value ->
+            commandEditor.setPassHeaders(value)
+            if (!applyingState) {
+                notifyChanged()
+            }
+        }
+    } else {
+        null
+    }
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -754,11 +764,23 @@ class WorkspaceCommandPanel(
         }
         content.add(commandEditor, cs)
 
+        passHeadersControls?.let { controls ->
+            cs.gridy++
+            cs.fill = GridBagConstraints.HORIZONTAL
+            content.add(controls.checkbox, cs)
+            cs.gridy++
+            content.add(controls.note, cs)
+        }
+
         ansiCheck?.let {
             cs.gridy++
             cs.fill = GridBagConstraints.HORIZONTAL
             content.add(it, cs)
-            it.addChangeListener { onChange() }
+            it.addChangeListener {
+                if (!applyingState) {
+                    notifyChanged()
+                }
+            }
         }
 
         dependenciesField?.let { field ->
@@ -766,32 +788,46 @@ class WorkspaceCommandPanel(
             content.add(JLabel(dependenciesLabelText), cs)
             cs.gridy++
             content.add(field, cs)
-            field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
+            field.document.addDocumentListener(WorkspaceDocumentListener {
+                if (!applyingState) {
+                    notifyChanged()
+                }
+            })
         }
 
-        tagsField?.let { field ->
-            cs.gridy++
-            content.add(JLabel(tagsLabelText), cs)
-            cs.gridy++
-            content.add(field, cs)
-            field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
+        commandEditor.addChangeListener {
+            if (!applyingState) {
+                notifyChanged()
+            }
         }
-
-        commandEditor.addChangeListener { onChange() }
 
         val scroll = JScrollPane(content)
         add(scroll, BorderLayout.CENTER)
-        commandEditor.display(Piper.CommandInvocation.getDefaultInstance())
+        display(null)
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        listeners += listener
     }
 
     fun display(state: WorkspaceCommandState?) {
-        commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
-        ansiCheck?.isSelected = state?.usesAnsi ?: false
-        dependenciesField?.text = state?.dependencies?.joinToString(", ") ?: ""
-        tagsField?.text = state?.tags?.joinToString(", ") ?: ""
+        applyingState = true
+        try {
+            commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
+            val dependencies = state?.dependencies?.joinToString(", ") ?: ""
+            ansiCheck?.isSelected = state?.usesAnsi ?: false
+            dependenciesField?.text = dependencies
+            val passHeaders = state?.passHeaders ?: false
+            passHeadersControls?.checkbox?.isSelected = passHeaders
+            commandEditor.setPassHeaders(passHeaders)
+        } finally {
+            applyingState = false
+        }
     }
 
     fun snapshot(): WorkspaceCommandState {
+        val passHeaders = passHeadersControls?.checkbox?.isSelected ?: commandEditor.passHeaders()
+        commandEditor.setPassHeaders(passHeaders)
         val command = runCatching { commandEditor.snapshot() }.getOrElse { error ->
             throw RuntimeException(error.message ?: "Invalid command configuration", error)
         }
@@ -799,19 +835,35 @@ class WorkspaceCommandPanel(
             ?.split(',')
             ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
             ?: emptyList()
-        val tags = tagsField?.text
-            ?.split(',')
-            ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-            ?: emptyList()
         return WorkspaceCommandState(
             command = command,
             usesAnsi = ansiCheck?.isSelected ?: false,
             dependencies = dependencies,
-            tags = tags,
+            passHeaders = passHeaders,
         )
     }
 
+    fun passHeaders(): Boolean = commandEditor.passHeaders()
+
+    fun setPassHeaders(value: Boolean) {
+        val wasApplying = applyingState
+        applyingState = true
+        try {
+            passHeadersControls?.checkbox?.isSelected = value
+            commandEditor.setPassHeaders(value)
+        } finally {
+            applyingState = wasApplying
+        }
+        if (!wasApplying) {
+            notifyChanged()
+        }
+    }
+
     fun isAnsiSelected(): Boolean = ansiCheck?.isSelected ?: false
+
+    private fun notifyChanged() {
+        listeners.forEach { it.invoke() }
+    }
 }
 
 class WorkspaceHistoryPanel : JPanel(BorderLayout()) {

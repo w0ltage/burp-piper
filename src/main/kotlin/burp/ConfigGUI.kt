@@ -192,57 +192,72 @@ fun <E> JList<E>.addDoubleClickListener(listener: (Int) -> Unit) {
 
 class CancelClosingWindow : RuntimeException()
 
+private data class MinimalToolOverview(
+    val name: String,
+    val enabled: Boolean,
+    val scope: String?,
+    val filterDescription: String?,
+    val commandDescription: String?,
+)
+
 class MinimalToolWidget(
     tool: Piper.MinimalTool,
-    private val panel: Container,
-    cs: GridBagConstraints,
     parent: Component?,
     showPassHeaders: Boolean,
     private val purpose: CommandInvocationPurpose,
     private val showScope: Boolean,
     showFilter: Boolean,
-) {
+) : JPanel(BorderLayout()) {
+
     private val header = WorkspaceHeaderPanel<Unit>(
         templateLabel = "Template",
         onChange = { onHeaderChanged() },
-        includeTagsField = false,
         includeTemplateField = false,
     )
     private val scopeCombo: JComboBox<ConfigMinimalToolScope>? = if (showScope) {
         JComboBox(ConfigMinimalToolScope.values()).apply {
             selectedItem = ConfigMinimalToolScope.fromScope(tool.scope)
         }
-    } else null
-    private val filterPanel = if (showFilter) MessageMatchEditorPanel(parent, showHeaderMatch = true) else null
-    private val commandEditor = CommandInvocationEditor(
+    } else {
+        null
+    }
+    private val filterPanel = if (showFilter) {
+        WorkspaceFilterPanel(parent) { onFilterChanged() }
+    } else {
+        null
+    }
+    private val commandPanel = WorkspaceCommandPanel(
         parent,
-        purpose,
-        showPassHeaders = showPassHeaders,
-        config = CommandInvocationEditorConfig(
-            showParametersTab = false,
-            showInputTab = false,
-            showFiltersTab = false,
-            showDependenciesField = false,
-        ),
+        onChange = { onCommandChanged() },
+        purpose = purpose,
+        showAnsiCheckbox = false,
+        showDependenciesField = false,
+        showPassHeadersToggle = showPassHeaders,
     )
-    private val behaviorPanel = JPanel().apply {
+    private val behaviorContent = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = EmptyBorder(8, 8, 8, 8)
         isOpaque = false
     }
-    private val behaviorScrollPane = JScrollPane(behaviorPanel).apply {
+    private val behaviorScrollPane = JScrollPane(behaviorContent).apply {
         border = EmptyBorder(0, 0, 0, 0)
         isOpaque = false
         viewport.isOpaque = false
     }
-    private var behaviorTabAdded = false
-    private val passHeadersControls: PassHeadersControls? = if (showPassHeaders) {
-        createPassHeadersControls(commandEditor.passHeaders(), commandEditor::setPassHeaders)
-    } else null
-    @Suppress("unused")
-    private val passHeadersCheckBox: JCheckBox? = passHeadersControls?.checkbox
     private val tabs = JTabbedPane()
-    private val overviewSummary = MinimalToolSummaryPanel()
+    private val overviewPanel = WorkspaceOverviewPanel<MinimalToolOverview>(
+        title = "Workspace overview",
+        emptyText = "Configure the tool to see summary.",
+    ) { overview ->
+        buildString {
+            appendLine("Name: ${overview.name.ifBlank { "(unnamed)" }}")
+            appendLine("Status: ${if (overview.enabled) "Enabled" else "Disabled"}")
+            appendLine("Scope: ${overview.scope ?: "(not applicable)"}")
+            appendLine("Filter: ${overview.filterDescription ?: "(none)"}")
+            appendLine("Command: ${overview.commandDescription ?: "(none)"}")
+        }
+    }
+    private var behaviorTabAdded = false
     private val dirtyListeners = mutableListOf<() -> Unit>()
 
     init {
@@ -250,45 +265,33 @@ class MinimalToolWidget(
             WorkspaceHeaderValues(
                 name = tool.name,
                 enabled = tool.enabled,
-                tags = emptyList(),
                 template = null,
             ),
         )
-        commandEditor.display(tool.cmd)
-        filterPanel?.display(tool.filter)
+        layout = BorderLayout()
+        add(header, BorderLayout.NORTH)
+        add(tabs, BorderLayout.CENTER)
 
-        passHeadersControls?.let { controls ->
-            addBehaviorComponent(controls.checkbox, spacing = 0)
-            addBehaviorComponent(controls.note, spacing = 4)
-        }
-
-        val container = JPanel(BorderLayout())
-        container.add(header, BorderLayout.NORTH)
         tabs.addTab("Overview", buildOverviewTab())
         filterPanel?.let { panel ->
-            tabs.addTab("Filter", JScrollPane(panel))
-            panel.addChangeListener {
-                notifyDirty()
-                updateOverview()
-            }
+            tabs.addTab("Filter", panel)
+            panel.display(tool.filter)
         }
-        tabs.addTab("Command", commandEditor)
-        commandEditor.addChangeListener {
+        tabs.addTab("Command", commandPanel)
+        commandPanel.display(
+            WorkspaceCommandState(
+                command = tool.cmd,
+                dependencies = tool.cmd.requiredInPathList,
+                passHeaders = tool.cmd.passHeaders,
+            ),
+        )
+
+        scopeCombo?.addActionListener {
             notifyDirty()
             updateOverview()
         }
-        container.add(tabs, BorderLayout.CENTER)
 
-        cs.gridwidth = 4
-        cs.fill = GridBagConstraints.BOTH
-        cs.weightx = 1.0
-        cs.weighty = 1.0
-        panel.add(container, cs)
-        cs.gridy += 1
-        cs.weighty = 0.0
-        cs.fill = GridBagConstraints.HORIZONTAL
-
-        scopeCombo?.addActionListener {
+        filterPanel?.addChangeListener { _ ->
             notifyDirty()
             updateOverview()
         }
@@ -299,28 +302,21 @@ class MinimalToolWidget(
     private fun buildOverviewTab(): JComponent {
         val container = JPanel(BorderLayout())
         container.border = EmptyBorder(8, 8, 8, 8)
-        container.add(overviewSummary, BorderLayout.NORTH)
+        container.add(overviewPanel, BorderLayout.NORTH)
 
-        val details = JPanel(GridBagLayout())
-        val constraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = 0
-            anchor = GridBagConstraints.WEST
-            insets = Insets(4, 4, 4, 4)
-        }
         scopeCombo?.let { combo ->
+            val details = JPanel(GridBagLayout())
+            val constraints = GridBagConstraints().apply {
+                gridx = 0
+                gridy = 0
+                anchor = GridBagConstraints.WEST
+                insets = Insets(4, 4, 4, 4)
+            }
             details.add(JLabel("Scope"), constraints)
             constraints.gridx = 1
             constraints.weightx = 1.0
             constraints.fill = GridBagConstraints.HORIZONTAL
             details.add(combo, constraints)
-            constraints.gridx = 0
-            constraints.gridy++
-            constraints.weightx = 0.0
-            constraints.fill = GridBagConstraints.NONE
-        }
-
-        if (details.componentCount > 0) {
             container.add(details, BorderLayout.CENTER)
         }
 
@@ -331,15 +327,15 @@ class MinimalToolWidget(
         val headerValues = header.readValues()
         val name = headerValues.name.trim()
         if (name.isEmpty()) throw RuntimeException("Name cannot be empty.")
-        val command = try {
-            commandEditor.snapshot()
+        val commandState = try {
+            commandPanel.snapshot()
         } catch (ex: Exception) {
             throw RuntimeException(ex.message ?: "Command configuration is invalid", ex)
         }
         try {
-            if (headerValues.enabled) command.checkDependencies()
+            if (headerValues.enabled) commandState.command.checkDependencies()
         } catch (c: DependencyException) {
-            when (JOptionPane.showConfirmDialog(panel, "${c.message}\n\nAre you sure you want this enabled?")) {
+            when (JOptionPane.showConfirmDialog(this, "${c.message}\n\nAre you sure you want this enabled?")) {
                 JOptionPane.NO_OPTION -> header.enabledToggle.isSelected = false
                 JOptionPane.CANCEL_OPTION -> throw CancelClosingWindow()
             }
@@ -352,21 +348,27 @@ class MinimalToolWidget(
             if (scopeCombo != null) {
                 scope = (scopeCombo.selectedItem as ConfigMinimalToolScope).scope
             }
-            cmd = command
+            cmd = commandState.command
         }.build()
     }
 
     fun addFilterChangeListener(listener: ChangeListener<Piper.MessageMatch>) {
-        filterPanel?.addChangeListener {
-            listener.valueChanged(filterPanel.value())
+        filterPanel?.addChangeListener { value ->
+            listener.valueChanged(value)
         }
     }
 
     fun addCommandChangeListener(listener: () -> Unit) {
-        commandEditor.addChangeListener(listener)
+        commandPanel.addChangeListener(listener)
     }
 
-    fun addBehaviorComponent(component: Component, spacing: Int = if (behaviorPanel.componentCount == 0) 0 else 8) {
+    fun passHeaders(): Boolean = commandPanel.passHeaders()
+
+    fun setPassHeaders(value: Boolean) {
+        commandPanel.setPassHeaders(value)
+    }
+
+    fun addBehaviorComponent(component: Component, spacing: Int = if (behaviorContent.componentCount == 0) 0 else 8) {
         val target = ensureBehaviorTab()
         if (spacing > 0) {
             target.add(Box.createVerticalStrut(spacing))
@@ -390,6 +392,16 @@ class MinimalToolWidget(
         updateOverview()
     }
 
+    private fun onFilterChanged() {
+        notifyDirty()
+        updateOverview()
+    }
+
+    private fun onCommandChanged() {
+        notifyDirty()
+        updateOverview()
+    }
+
     private fun notifyDirty() {
         dirtyListeners.forEach { it.invoke() }
     }
@@ -398,18 +410,20 @@ class MinimalToolWidget(
         val headerValues = header.readValues()
         val scopeText = scopeCombo?.selectedItem?.toString()
         val filterSummary = filterPanel?.value()?.toHumanReadable(negation = false, hideParentheses = true)
-        val commandResult = runCatching { commandEditor.snapshot() }
+        val commandResult = runCatching { commandPanel.snapshot() }
         val commandLine = when {
-            commandResult.isSuccess -> commandResult.getOrNull()?.commandLine
+            commandResult.isSuccess -> commandResult.getOrNull()?.command?.commandLine
             commandResult.exceptionOrNull()?.message.orEmpty().contains("at least one token", ignoreCase = true) -> null
             else -> "(invalid configuration)"
         }
-        overviewSummary.render(
-            name = headerValues.name,
-            enabled = headerValues.enabled,
-            scope = scopeText,
-            filterDescription = filterSummary,
-            commandDescription = commandLine,
+        overviewPanel.display(
+            MinimalToolOverview(
+                name = headerValues.name,
+                enabled = headerValues.enabled,
+                scope = scopeText,
+                filterDescription = filterSummary,
+                commandDescription = commandLine,
+            ),
         )
     }
 
@@ -418,43 +432,10 @@ class MinimalToolWidget(
             tabs.addTab("Behavior", behaviorScrollPane)
             behaviorTabAdded = true
         }
-        return behaviorPanel
+        return behaviorContent
     }
 }
 
-private class MinimalToolSummaryPanel : JPanel(BorderLayout()) {
-    private val summaryArea = JTextArea()
-
-    init {
-        border = EmptyBorder(0, 0, 12, 0)
-        summaryArea.isEditable = false
-        summaryArea.lineWrap = true
-        summaryArea.wrapStyleWord = true
-        summaryArea.border = BorderFactory.createEmptyBorder()
-        add(summaryArea, BorderLayout.CENTER)
-        render(name = "", enabled = false, scope = null, filterDescription = null, commandDescription = null)
-    }
-
-    fun render(
-        name: String,
-        enabled: Boolean,
-        scope: String?,
-        filterDescription: String?,
-        commandDescription: String?,
-    ) {
-        val text = buildString {
-            appendLine("Name: ${if (name.isBlank()) "(untitled)" else name}")
-            appendLine("Status: ${if (enabled) "Enabled" else "Disabled"}")
-            scope?.let {
-                appendLine("Scope: $it")
-            }
-            appendLine("Filter: ${filterDescription ?: "(none)"}")
-            appendLine("Command: ${commandDescription ?: "(not configured)"}")
-        }
-        summaryArea.text = text.trimEnd()
-        summaryArea.caretPosition = 0
-    }
-}
 
 abstract class CollapsedWidget<E>(private val w: Window, var value: E?, private val caption: String, val removable: Boolean) : ClipboardOwner {
     private val label = JLabel()
@@ -626,8 +607,29 @@ abstract class MinimalToolDialog<E>(private val common: Piper.MinimalTool, paren
                                     showFilter: Boolean = true,
                                     purpose: CommandInvocationPurpose = CommandInvocationPurpose.SELF_FILTER) :
         ConfigDialog<E>(parent, if (common.name.isEmpty()) "Add $noun" else "Edit $noun \"${common.name}\"") {
-    private val mtw = MinimalToolWidget(common, panel, cs, this, showPassHeaders = showPassHeaders,
-            purpose = purpose, showScope = showScope, showFilter = showFilter)
+
+    private val mtw: MinimalToolWidget
+
+    init {
+        val widget = MinimalToolWidget(
+            common,
+            this,
+            showPassHeaders = showPassHeaders,
+            purpose = purpose,
+            showScope = showScope,
+            showFilter = showFilter,
+        )
+        cs.gridwidth = 4
+        cs.fill = GridBagConstraints.BOTH
+        cs.weightx = 1.0
+        cs.weighty = 1.0
+        panel.add(widget, cs)
+        cs.gridy += 1
+        cs.weighty = 0.0
+        cs.fill = GridBagConstraints.HORIZONTAL
+        cs.gridwidth = 1
+        mtw = widget
+    }
 
     override fun processGUI(): E = processGUI(mtw.toMinimalTool())
 
@@ -816,11 +818,98 @@ fun <E> createLabeledComboBox(caption: String, initialValue: String, panel: Cont
     return createLabeledWidget(caption, cb, panel, cs)
 }
 
+private fun buildInlineRow(
+    caption: String,
+    widget: Component,
+    trailing: List<Component> = emptyList(),
+): JPanel {
+    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
+    val label = JLabel(caption)
+    if (widget is JComponent) {
+        label.labelFor = widget
+        widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
+    }
+
+    row.add(label, GridBagConstraints().apply {
+        gridx = 0
+        gridy = 0
+        anchor = GridBagConstraints.WEST
+        insets = Insets(0, 0, 0, 8)
+    })
+
+    row.add(widget, GridBagConstraints().apply {
+        gridx = 1
+        gridy = 0
+        weightx = 1.0
+        fill = GridBagConstraints.HORIZONTAL
+        insets = Insets(0, 0, 0, if (trailing.isNotEmpty()) 12 else 0)
+    })
+
+    trailing.forEachIndexed { index, component ->
+        row.add(component, GridBagConstraints().apply {
+            gridx = 2 + index
+            gridy = 0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(0, if (index == 0) 0 else 8, 0, 0)
+        })
+    }
+
+    return row
+}
+
 fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Container, cs: GridBagConstraints): T {
     cs.gridy++
-    cs.gridwidth = 1 ; cs.gridx = 0 ; panel.add(JLabel(caption), cs)
-    cs.gridwidth = 3 ; cs.gridx = 1 ; panel.add(widget, cs)
+
+    val previousFill = cs.fill
+    val previousWeightX = cs.weightx
+    val previousAnchor = cs.anchor
+    val previousGridWidth = cs.gridwidth
+    val previousGridX = cs.gridx
+
+    cs.gridx = 0
+    cs.gridwidth = 4
+    cs.fill = GridBagConstraints.HORIZONTAL
+    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
+    cs.anchor = GridBagConstraints.NORTHWEST
+
+    panel.add(buildInlineRow(caption, widget), cs)
+
+    cs.gridx = previousGridX
+    cs.gridwidth = previousGridWidth
+    cs.fill = previousFill
+    cs.weightx = previousWeightX
+    cs.anchor = previousAnchor
     return widget
+}
+
+private fun addInlineLabeledRow(
+    caption: String,
+    widget: JComponent,
+    panel: Container,
+    cs: GridBagConstraints,
+    trailing: List<Component> = emptyList(),
+) {
+    cs.gridy++
+
+    val previousFill = cs.fill
+    val previousWeightX = cs.weightx
+    val previousAnchor = cs.anchor
+    val previousGridWidth = cs.gridwidth
+    val previousGridX = cs.gridx
+
+    cs.gridx = 0
+    cs.gridwidth = 4
+    cs.fill = GridBagConstraints.HORIZONTAL
+    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
+    cs.anchor = GridBagConstraints.NORTHWEST
+
+    panel.add(buildInlineRow(caption, widget, trailing), cs)
+
+    cs.gridx = previousGridX
+    cs.gridwidth = previousGridWidth
+    cs.fill = previousFill
+    cs.weightx = previousWeightX
+    cs.anchor = previousAnchor
 }
 
 class HeaderMatchDialog(hm: Piper.HeaderMatch, parent: Component) : ConfigDialog<Piper.HeaderMatch>(parent, "Header filter editor") {
@@ -853,29 +942,6 @@ data class CommandLineParameter(val value: String?) { // null = input file name
         value.isNullOrEmpty() -> CMDLINE_EMPTY_STRING_PLACEHOLDER // empty strings would be rendered as a barely visible 1 to 2 px high item
         else -> value
     }
-}
-
-const val PASS_HTTP_HEADERS_NOTE = "<html>Note: if the above checkbox is <font color='red'>unchecked</font>, messages without a body (such as<br>" +
-        "GET/HEAD requests or 204 No Content responses) are <font color='red'>ignored by this tool</font>.</html>"
-
-private data class PassHeadersControls(
-    val checkbox: JCheckBox,
-    val note: JLabel,
-)
-
-private fun createPassHeadersControls(
-    initialValue: Boolean,
-    onToggle: (Boolean) -> Unit,
-): PassHeadersControls {
-    val checkbox = JCheckBox("Pass HTTP headers to command").apply {
-        alignmentX = Component.LEFT_ALIGNMENT
-        isSelected = initialValue
-        addActionListener { onToggle(isSelected) }
-    }
-    val note = JLabel(PASS_HTTP_HEADERS_NOTE).apply {
-        alignmentX = Component.LEFT_ALIGNMENT
-    }
-    return PassHeadersControls(checkbox, note)
 }
 
 class CommandInvocationDialog(ci: Piper.CommandInvocation, private val purpose: CommandInvocationPurpose, parent: Component,
@@ -1213,10 +1279,13 @@ fun <E : Component> addFullWidthComponent(c: E, panel: Container, cs: GridBagCon
     return c
 }
 
-class HexASCIITextField(private val tf: JTextField = JTextField(),
-                        private val rbHex: JRadioButton = JRadioButton("Hex"),
-                        private val rbASCII: JRadioButton = JRadioButton("ASCII"),
-                        private val field: String, private var isASCII: Boolean) {
+class HexASCIITextField(
+    private val tf: JTextField = JTextField(),
+    private val rbHex: JRadioButton = JRadioButton("Hex"),
+    private val rbASCII: JRadioButton = JRadioButton("ASCII"),
+    private val field: String,
+    private var isASCII: Boolean,
+) {
 
     constructor(field: String, source: ByteString, dialog: Component) : this(field=field, isASCII=source.isValidUtf8) {
         if (isASCII) {
@@ -1228,6 +1297,8 @@ class HexASCIITextField(private val tf: JTextField = JTextField(),
         }
 
         with(ButtonGroup()) { add(rbHex); add(rbASCII); }
+
+        tf.columns = 28
 
         rbASCII.addActionListener {
             if (isASCII) return@addActionListener
@@ -1264,11 +1335,7 @@ class HexASCIITextField(private val tf: JTextField = JTextField(),
     }
 
     fun addWidgets(caption: String, cs: GridBagConstraints, panel: Container) {
-        cs.gridy++
-        cs.gridx = 0 ; panel.add(JLabel(caption), cs)
-        cs.gridx = 1 ; panel.add(tf,      cs)
-        cs.gridx = 2 ; panel.add(rbASCII, cs)
-        cs.gridx = 3 ; panel.add(rbHex,   cs)
+        addInlineLabeledRow(caption, tf, panel, cs, trailing = listOf(rbASCII, rbHex))
     }
 
     fun setValue(source: ByteString) {
@@ -1302,7 +1369,10 @@ private fun parseHexNibble(c: Char): Int = if (c in '0'..'9') (c - '0')
 else ((c.toLowerCase() - 'a') + 0xA)
 
 class RegExpWidget(regex: Piper.RegularExpression, panel: Container, cs: GridBagConstraints) {
-    private val tfPattern = createLabeledTextField("Matches regular expression: ", regex.pattern, panel, cs)
+    private val tfPattern = JTextField(regex.pattern).apply {
+        columns = 28
+        addInlineLabeledRow("Matches regular expression:", this, panel, cs)
+    }
     private val esw = EnumSetWidget(regex.flagSet, panel, cs, "Regular expression flags: (see JDK documentation)", RegExpFlag::class.java)
 
     fun hasPattern(): Boolean = tfPattern.text.isNotEmpty()
@@ -1345,19 +1415,22 @@ class EnumSetWidget<E : Enum<E>>(set: Set<E>, panel: Container, cs: GridBagConst
 
     init {
         addFullWidthComponent(JLabel(caption), panel, cs)
-        cs.gridy++
-        cs.gridwidth = 1
+        val originalFill = cs.fill
+        val originalWeightX = cs.weightx
 
-        cbMap = enumClass.enumConstants.asIterable().associateWithTo(EnumMap(enumClass)) {
-            val cb = createCheckBox(it.toString(), it in set, panel, cs)
-            if (cs.gridx == 0) {
-                cs.gridx = 1
-            } else {
-                cs.gridy++
-                cs.gridx = 0
-            }
-            cb
+        cbMap = enumClass.enumConstants.asIterable().associateWithTo(EnumMap(enumClass)) { value ->
+            cs.gridy++
+            cs.gridx = 0
+            cs.gridwidth = 4
+            cs.fill = GridBagConstraints.HORIZONTAL
+            cs.weightx = 1.0
+            createCheckBox(value.toString(), value in set, panel, cs)
         }.toMap()
+
+        cs.gridwidth = 1
+        cs.fill = originalFill
+        cs.weightx = originalWeightX
+        cs.gridx = 0
     }
 }
 

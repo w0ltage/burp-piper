@@ -29,6 +29,13 @@ Piper integrates external tools and their pipelines to Burp Suite. The extension
 - Use `createPassHeadersControls` (in `ConfigGUI.kt`) when exposing the “Pass HTTP headers to command” toggle so the checkbox and explanatory note remain consistent across inline editors and dialogs.
 - When the input tab is hidden, call `CommandInvocationEditor.setPassHeaders` directly to preserve the stored state.
 
+### Workspace UI components
+- Reuse `WorkspaceHeaderPanel` for the standard name/template/status header; populate it with `WorkspaceHeaderValues` and register callbacks with `onChange`.
+- The right-hand tab stack lives in `MinimalToolWidget`; add new Behavior controls with `addBehaviorComponent` and extra tabs with `addCustomTab` instead of duplicating layout code.
+- `WorkspaceCommandPanel` owns the command invocation editor. Drive it through `display()`/`snapshot()`, and use the new `passHeaders()`/`setPassHeaders()` helpers when relocating the pass-headers toggle to other tabs.
+- `WorkspaceFilterPanel` and `WorkspaceOverviewPanel` already encapsulate the common filter and summary layouts; instantiate them directly rather than cloning Swing trees.
+- Prefer composing editors from these widgets (as done in `MinimalToolManagerPanel` and `MessageViewerWorkspacePanel`) so split panes resize consistently across tools.
+
 ## Montoya API Access
 Because direct MCP access is unavailable, fetch Montoya API documentation via HTTP GET requests to Context7 when you need clarification.
 

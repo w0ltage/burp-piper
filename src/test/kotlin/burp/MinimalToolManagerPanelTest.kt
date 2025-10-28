@@ -212,8 +212,7 @@ class MinimalToolManagerPanelTest {
             val editor = editorField.get(panel)
             val widgetField = findField(editor, "widget")
             val widget = widgetField.get(editor) ?: error("Minimal tool widget should be available")
-            val passHeadersField = findField(widget, "passHeadersCheckBox")
-            val passHeaders = requireNotNull(passHeadersField.get(widget) as? JCheckBox) {
+            val passHeaders = requireNotNull(findCheckbox(widget as Component, "Pass HTTP headers to command")) {
                 "Pass headers checkbox should be available"
             }
             if (passHeaders.isSelected != enabled) {
@@ -226,6 +225,21 @@ class MinimalToolManagerPanelTest {
                 saveButton.doClick()
             }
         }
+    }
+
+    private fun findCheckbox(root: Component, label: String): JCheckBox? {
+        if (root is JCheckBox && root.text == label) {
+            return root
+        }
+        if (root is java.awt.Container) {
+            root.components.forEach { child ->
+                val match = findCheckbox(child, label)
+                if (match != null) {
+                    return match
+                }
+            }
+        }
+        return null
     }
 
     private fun sampleCommand(): Piper.CommandInvocation =

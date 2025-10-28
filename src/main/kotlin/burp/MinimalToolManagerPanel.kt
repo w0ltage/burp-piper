@@ -117,13 +117,7 @@ private class FilteredMinimalToolListModel<T>(
     private fun matches(value: T): Boolean {
         if (query.isBlank()) return true
         val tool = extractor(value)
-        val tags = tool.cmd.extractTags()
-        val haystack = buildString {
-            append(tool.name.lowercase())
-            append(' ')
-            append(tags.joinToString(" ") { it.lowercase() })
-        }
-        return haystack.contains(query)
+        return tool.name.lowercase().contains(query)
     }
 
     override fun intervalAdded(e: ListDataEvent?) = rebuild()
@@ -145,9 +139,7 @@ private class MinimalToolListCellRenderer<T>(
         val tool = value?.let { extractor(it as T) }
         if (tool != null) {
             val status = if (tool.enabled) "Enabled" else "Disabled"
-            val tags = tool.cmd.extractTags()
-            val tagSuffix = if (tags.isEmpty()) "" else " – " + tags.joinToString(", ")
-            text = tool.name + " [$status]" + tagSuffix
+            text = tool.name + " [$status]"
         }
         return component
     }
@@ -160,8 +152,7 @@ private abstract class MinimalToolInlineEditor<T>(
 
     private val cards = JPanel(CardLayout())
     private val placeholder = JPanel(BorderLayout())
-    private val formPanel = JPanel(GridBagLayout())
-    private val scrollPane = JScrollPane(formPanel)
+    private val detailPanel = JPanel(BorderLayout())
     private var widget: MinimalToolWidget? = null
     private var dirtyListener: (() -> Unit)? = null
 
@@ -171,7 +162,7 @@ private abstract class MinimalToolInlineEditor<T>(
     init {
         placeholder.add(JLabel("Select an item to edit", SwingConstants.CENTER), BorderLayout.CENTER)
         cards.add(placeholder, "empty")
-        cards.add(scrollPane, "form")
+        cards.add(detailPanel, "form")
         add(cards, BorderLayout.CENTER)
     }
 
@@ -182,43 +173,26 @@ private abstract class MinimalToolInlineEditor<T>(
         currentValue = value
         if (value == null) {
             (cards.layout as CardLayout).show(cards, "empty")
-            formPanel.removeAll()
+            detailPanel.removeAll()
             widget = null
             return
         }
-        formPanel.removeAll()
-        val cs = GridBagConstraints().apply {
-            fill = GridBagConstraints.BOTH
-            anchor = GridBagConstraints.FIRST_LINE_START
-            weightx = 1.0
-            weighty = 1.0
-            gridx = 0
-            gridy = 0
-            insets = Insets(2, 0, 2, 0)
-        }
         widget = MinimalToolWidget(
             extractCommon(value),
-            formPanel,
-            cs,
             locateParentComponent(),
             config.showPassHeaders,
             config.purpose,
             config.showScope,
             config.showFilter,
         )
-        widget?.setDirtyListener { notifyDirty() }
-        widget?.addCommandChangeListener { notifyDirty() }
-        addCustomFields(value, formPanel, cs)
-        val fillerConstraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = cs.gridy + 1
-            gridwidth = 4
-            weightx = 1.0
-            weighty = 1.0
-            fill = GridBagConstraints.BOTH
+        detailPanel.removeAll()
+        widget?.let { minimal ->
+            detailPanel.add(minimal, BorderLayout.CENTER)
+            minimal.setDirtyListener { notifyDirty() }
+            minimal.addCommandChangeListener { notifyDirty() }
+            addCustomFields(value, detailPanel, GridBagConstraints())
+            attachDirtyListeners(minimal)
         }
-        formPanel.add(JPanel().apply { isOpaque = false }, fillerConstraints)
-        attachDirtyListeners(formPanel)
         (cards.layout as CardLayout).show(cards, "form")
         revalidate()
         repaint()
@@ -321,7 +295,7 @@ private class MinimalToolManagerPanel<T>(
 
         editor.setDirtyListener { markDirty() }
 
-        searchField.toolTipText = "Search by name or tag"
+        searchField.toolTipText = "Search by name"
         searchField.document.addDocumentListener(SimpleDocumentCallback { applyFilter() })
 
         val leftPanel = JPanel(BorderLayout()).apply {
@@ -556,7 +530,10 @@ private class MinimalToolManagerPanel<T>(
     override fun lostOwnership(clipboard: java.awt.datatransfer.Clipboard?, contents: Transferable?) {}
 }
 
-private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(parent, MinimalToolEditorConfig()) {
+private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(
+    parent,
+    MinimalToolEditorConfig(showPassHeaders = false),
+) {
     private lateinit var hasGUICheckBox: JCheckBox
     private lateinit var avoidPipeCheckBox: JCheckBox
     private lateinit var minInputsSpinner: JSpinner
@@ -565,6 +542,13 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
     override fun extractCommon(value: Piper.UserActionTool): Piper.MinimalTool = value.common
 
     override fun addCustomFields(value: Piper.UserActionTool, panel: Container, cs: GridBagConstraints) {
+        val passHeadersControls = createPassHeadersControls(value.common.cmd.passHeaders) { selected ->
+            minimalToolWidget()?.setPassHeaders(selected)
+            notifyDirty()
+        }
+        minimalToolWidget()?.addBehaviorComponent(passHeadersControls.checkbox)
+        minimalToolWidget()?.addBehaviorComponent(passHeadersControls.note, spacing = 4)
+
         val container = JPanel()
         container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
         hasGUICheckBox = JCheckBox("Has its own GUI (no need for a console window)", value.hasGUI).apply {
@@ -586,7 +570,7 @@ private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor
         container.add(Box.createVerticalGlue())
 
         container.alignmentX = Component.LEFT_ALIGNMENT
-        minimalToolWidget()?.addBehaviorComponent(container)
+        minimalToolWidget()?.addBehaviorComponent(container, spacing = 12)
     }
 
     override fun buildUpdatedValue(original: Piper.UserActionTool, common: Piper.MinimalTool): Piper.UserActionTool {
