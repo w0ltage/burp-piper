@@ -364,7 +364,13 @@ private class MessageMatchForm(
             insets = Insets(4, 4, 4, 4)
         }
 
+        val previousFill = cs.fill
+        val previousGridWidth = cs.gridwidth
+        cs.gridwidth = 4
+        cs.fill = GridBagConstraints.HORIZONTAL
         add(negationBox, cs)
+        cs.gridwidth = previousGridWidth
+        cs.fill = previousFill
 
         prefixField.addWidgets("Starts with:", cs, this)
         prefixField.addChangeListener { notifyChanged() }
