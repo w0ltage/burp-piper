@@ -66,6 +66,7 @@ open class WorkspaceHeaderPanel<T>(
 
     private var templateRowIndex = -1
     private var templateRowNextGridx = 2
+    private var nextRowIndex = if (includeTemplateField) 2 else 1
     private var suppressTemplateEvent = false
 
     init {
@@ -94,15 +95,24 @@ open class WorkspaceHeaderPanel<T>(
         }
     }
 
-    fun addTemplateAccessoryField(label: String, component: JComponent) {
-        addTemplateField(label, component)
-    }
-
-    protected fun addTemplateField(label: String, component: JComponent) {
+    fun addTemplateField(label: String, component: JComponent) {
         if (!includeTemplateField || templateRowIndex < 0) return
         addLabel(label, templateRowNextGridx, templateRowIndex)
         addComponent(component, gridx = templateRowNextGridx + 1, gridy = templateRowIndex)
         templateRowNextGridx += 2
+    }
+
+    fun addField(label: String, component: JComponent) {
+        val row = nextRowIndex++
+        addLabel(label, 0, row)
+        addComponent(
+            component,
+            gridx = 1,
+            gridy = row,
+            gridwidth = 2,
+            weightx = 1.0,
+            fill = GridBagConstraints.HORIZONTAL,
+        )
     }
 
     fun withTemplateChangeSuppressed(block: () -> Unit) {

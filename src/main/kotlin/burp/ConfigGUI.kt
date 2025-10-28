@@ -261,6 +261,14 @@ class MinimalToolWidget(
     private val dirtyListeners = mutableListOf<() -> Unit>()
 
     init {
+        scopeCombo?.let { combo ->
+            header.addField("Scope", combo)
+            combo.addActionListener {
+                notifyDirty()
+                updateOverview()
+            }
+        }
+
         header.setValues(
             WorkspaceHeaderValues(
                 name = tool.name,
@@ -286,11 +294,6 @@ class MinimalToolWidget(
             ),
         )
 
-        scopeCombo?.addActionListener {
-            notifyDirty()
-            updateOverview()
-        }
-
         filterPanel?.addChangeListener { _ ->
             notifyDirty()
             updateOverview()
@@ -300,27 +303,10 @@ class MinimalToolWidget(
     }
 
     private fun buildOverviewTab(): JComponent {
-        val container = JPanel(BorderLayout())
-        container.border = EmptyBorder(8, 8, 8, 8)
-        container.add(overviewPanel, BorderLayout.NORTH)
-
-        scopeCombo?.let { combo ->
-            val details = JPanel(GridBagLayout())
-            val constraints = GridBagConstraints().apply {
-                gridx = 0
-                gridy = 0
-                anchor = GridBagConstraints.WEST
-                insets = Insets(4, 4, 4, 4)
-            }
-            details.add(JLabel("Scope"), constraints)
-            constraints.gridx = 1
-            constraints.weightx = 1.0
-            constraints.fill = GridBagConstraints.HORIZONTAL
-            details.add(combo, constraints)
-            container.add(details, BorderLayout.CENTER)
+        return JPanel(BorderLayout()).apply {
+            border = EmptyBorder(8, 8, 8, 8)
+            add(overviewPanel, BorderLayout.NORTH)
         }
-
-        return container
     }
 
     fun toMinimalTool(): Piper.MinimalTool {

@@ -532,7 +532,7 @@ private class MinimalToolManagerPanel<T>(
 
 private class MenuItemInlineEditor(parent: Component?) : MinimalToolInlineEditor<Piper.UserActionTool>(
     parent,
-    MinimalToolEditorConfig(showPassHeaders = false),
+    MinimalToolEditorConfig(showPassHeaders = false, showScope = true),
 ) {
     private lateinit var hasGUICheckBox: JCheckBox
     private lateinit var avoidPipeCheckBox: JCheckBox
@@ -760,7 +760,7 @@ fun createMacroManager(
         model,
         parent,
         extractor = { it },
-        editorFactory = { BasicMinimalToolEditor(it, MinimalToolEditorConfig()) },
+        editorFactory = { BasicMinimalToolEditor(it, MinimalToolEditorConfig(showScope = true)) },
         newButtonLabel = "+ New macro",
         defaultFactory = { Piper.MinimalTool.getDefaultInstance() },
         cloneFactory = { it.toBuilder().build() },
