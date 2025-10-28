@@ -15,7 +15,6 @@ import javax.swing.DefaultComboBoxModel
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
-import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
@@ -225,29 +224,28 @@ private fun createViewerOverviewPanel(): WorkspaceOverviewPanel<ViewerEditorStat
 
 private class ViewerHeaderPanel(
     onChange: () -> Unit,
-) : WorkspaceHeaderPanel<ViewerTemplateOption>("Template", onChange) {
+) : WorkspaceHeaderPanel<ViewerTemplateOption>(
+    templateLabel = "Template",
+    onChange = onChange,
+    includeScopeField = true,
+) {
 
-    private val scopeCombo = JComboBox(ScopeOption.values())
     private var templates: List<ViewerTemplateOption> = emptyList()
 
     init {
-        addTemplateField("Scope", scopeCombo)
-        scopeCombo.addActionListener { onChange() }
         updateTemplates(null)
-        scopeCombo.selectedItem = ScopeOption.from(null)
     }
 
     fun apply(state: ViewerEditorState?) {
-        val selectedId = state?.templateId
-        updateTemplates(selectedId)
+        val selectedTemplate = updateTemplates(state?.templateId)
         setValues(
             WorkspaceHeaderValues(
                 name = state?.name.orEmpty(),
                 enabled = state?.enabled ?: false,
-                template = templateCombo.selectedItem as? ViewerTemplateOption,
+                template = selectedTemplate,
+                scope = state?.scope,
             ),
         )
-        scopeCombo.selectedItem = ScopeOption.from(state?.scope)
     }
 
     fun snapshot(): HeaderSnapshot {
@@ -257,30 +255,27 @@ private class ViewerHeaderPanel(
             name = values.name,
             enabled = values.enabled,
             templateId = selectedTemplate?.id,
-            scope = (scopeCombo.selectedItem as ScopeOption).scope,
+            scope = values.scope ?: Piper.MinimalTool.Scope.REQUEST_RESPONSE,
         )
     }
 
-    fun setScopeEnabled(enabled: Boolean) {
-        scopeCombo.isEnabled = enabled
-    }
-
-    private fun updateTemplates(selectedId: String?) {
+    private fun updateTemplates(selectedId: String?): ViewerTemplateOption? {
         templates = listOf(
             ViewerTemplateOption(null, "Custom", ""),
             ViewerTemplateOption("json", "JSON formatter", "jq based pretty-printer"),
             ViewerTemplateOption("asn1", "ASN.1 decoder", "openssl asn1parse"),
             ViewerTemplateOption("gzip", "GZIP inflator", "gzip --decompress"),
         )
+        val selected = templates.firstOrNull { it.id == selectedId } ?: templates.firstOrNull()
         withTemplateChangeSuppressed {
             templateCombo.model = DefaultComboBoxModel(templates.toTypedArray())
-            val selected = templates.firstOrNull { it.id == selectedId } ?: templates.firstOrNull()
             when {
                 selected != null -> templateCombo.selectedItem = selected
                 templateCombo.itemCount > 0 -> templateCombo.selectedIndex = 0
                 else -> templateCombo.selectedIndex = -1
             }
         }
+        return selected
     }
 }
 
@@ -290,23 +285,6 @@ private data class HeaderSnapshot(
     val templateId: String?,
     val scope: Piper.MinimalTool.Scope,
 )
-
-private enum class ScopeOption(val scope: Piper.MinimalTool.Scope, val label: String) {
-    BOTH(Piper.MinimalTool.Scope.REQUEST_RESPONSE, "Requests & Responses"),
-    REQUEST(Piper.MinimalTool.Scope.REQUEST_ONLY, "Requests"),
-    RESPONSE(Piper.MinimalTool.Scope.RESPONSE_ONLY, "Responses"),
-    ;
-
-    override fun toString(): String = label
-
-    companion object {
-        fun from(scope: Piper.MinimalTool.Scope?): ScopeOption = when (scope) {
-            Piper.MinimalTool.Scope.REQUEST_ONLY -> REQUEST
-            Piper.MinimalTool.Scope.RESPONSE_ONLY -> RESPONSE
-            else -> BOTH
-        }
-    }
-}
 
 private class CommentatorOptionsPanel(onChange: () -> Unit) : JPanel() {
     private val overwriteBox = JCheckBox("Overwrite existing comments")

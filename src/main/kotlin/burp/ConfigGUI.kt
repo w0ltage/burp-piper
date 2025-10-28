@@ -209,18 +209,13 @@ class MinimalToolWidget(
     showFilter: Boolean,
 ) : JPanel(BorderLayout()) {
 
+    private val dirtyListeners = mutableListOf<() -> Unit>()
     private val header = WorkspaceHeaderPanel<Unit>(
         templateLabel = "Template",
         onChange = { onHeaderChanged() },
         includeTemplateField = false,
+        includeScopeField = showScope,
     )
-    private val scopeCombo: JComboBox<ConfigMinimalToolScope>? = if (showScope) {
-        JComboBox(ConfigMinimalToolScope.values()).apply {
-            selectedItem = ConfigMinimalToolScope.fromScope(tool.scope)
-        }
-    } else {
-        null
-    }
     private val filterPanel = if (showFilter) {
         WorkspaceFilterPanel(parent) { onFilterChanged() }
     } else {
@@ -258,7 +253,6 @@ class MinimalToolWidget(
         }
     }
     private var behaviorTabAdded = false
-    private val dirtyListeners = mutableListOf<() -> Unit>()
 
     init {
         header.setValues(
@@ -266,6 +260,7 @@ class MinimalToolWidget(
                 name = tool.name,
                 enabled = tool.enabled,
                 template = null,
+                scope = tool.scope,
             ),
         )
         layout = BorderLayout()
@@ -286,11 +281,6 @@ class MinimalToolWidget(
             ),
         )
 
-        scopeCombo?.addActionListener {
-            notifyDirty()
-            updateOverview()
-        }
-
         filterPanel?.addChangeListener { _ ->
             notifyDirty()
             updateOverview()
@@ -303,22 +293,6 @@ class MinimalToolWidget(
         val container = JPanel(BorderLayout())
         container.border = EmptyBorder(8, 8, 8, 8)
         container.add(overviewPanel, BorderLayout.NORTH)
-
-        scopeCombo?.let { combo ->
-            val details = JPanel(GridBagLayout())
-            val constraints = GridBagConstraints().apply {
-                gridx = 0
-                gridy = 0
-                anchor = GridBagConstraints.WEST
-                insets = Insets(4, 4, 4, 4)
-            }
-            details.add(JLabel("Scope"), constraints)
-            constraints.gridx = 1
-            constraints.weightx = 1.0
-            constraints.fill = GridBagConstraints.HORIZONTAL
-            details.add(combo, constraints)
-            container.add(details, BorderLayout.CENTER)
-        }
 
         return container
     }
@@ -345,9 +319,7 @@ class MinimalToolWidget(
             this.name = name
             if (headerValues.enabled) this.enabled = true
             filterPanel?.value()?.let { this.filter = it }
-            if (scopeCombo != null) {
-                scope = (scopeCombo.selectedItem as ConfigMinimalToolScope).scope
-            }
+            headerValues.scope?.let { scope = it }
             cmd = commandState.command
         }.build()
     }
@@ -408,7 +380,7 @@ class MinimalToolWidget(
 
     private fun updateOverview() {
         val headerValues = header.readValues()
-        val scopeText = scopeCombo?.selectedItem?.toString()
+        val scopeText = headerValues.scope?.let { WorkspaceScopeOption.from(it).toString() }
         val filterSummary = filterPanel?.value()?.toHumanReadable(negation = false, hideParentheses = true)
         val commandResult = runCatching { commandPanel.snapshot() }
         val commandLine = when {
