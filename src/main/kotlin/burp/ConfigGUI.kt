@@ -818,6 +818,45 @@ fun <E> createLabeledComboBox(caption: String, initialValue: String, panel: Cont
     return createLabeledWidget(caption, cb, panel, cs)
 }
 
+private fun buildInlineRow(
+    caption: String,
+    widget: Component,
+    trailing: List<Component> = emptyList(),
+): JPanel {
+    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
+    val label = JLabel(caption)
+    if (widget is JComponent) {
+        label.labelFor = widget
+        widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
+    }
+
+    row.add(label, GridBagConstraints().apply {
+        gridx = 0
+        gridy = 0
+        anchor = GridBagConstraints.WEST
+        insets = Insets(0, 0, 0, 8)
+    })
+
+    row.add(widget, GridBagConstraints().apply {
+        gridx = 1
+        gridy = 0
+        weightx = 1.0
+        fill = GridBagConstraints.HORIZONTAL
+        insets = Insets(0, 0, 0, if (trailing.isNotEmpty()) 12 else 0)
+    })
+
+    trailing.forEachIndexed { index, component ->
+        row.add(component, GridBagConstraints().apply {
+            gridx = 2 + index
+            gridy = 0
+            anchor = GridBagConstraints.WEST
+            insets = Insets(0, if (index == 0) 0 else 8, 0, 0)
+        })
+    }
+
+    return row
+}
+
 fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Container, cs: GridBagConstraints): T {
     cs.gridy++
 
@@ -833,30 +872,7 @@ fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Conta
     cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
     cs.anchor = GridBagConstraints.NORTHWEST
 
-    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
-    val label = JLabel(caption).apply {
-        if (widget is JComponent) {
-            labelFor = widget
-        }
-    }
-    row.add(label, GridBagConstraints().apply {
-        gridx = 0
-        gridy = 0
-        anchor = GridBagConstraints.WEST
-        insets = Insets(0, 0, 0, 8)
-    })
-
-    if (widget is JComponent) {
-        widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
-    }
-    row.add(widget, GridBagConstraints().apply {
-        gridx = 1
-        gridy = 0
-        weightx = 1.0
-        fill = GridBagConstraints.HORIZONTAL
-    })
-
-    panel.add(row, cs)
+    panel.add(buildInlineRow(caption, widget), cs)
 
     cs.gridx = previousGridX
     cs.gridwidth = previousGridWidth
@@ -887,36 +903,7 @@ private fun addInlineLabeledRow(
     cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
     cs.anchor = GridBagConstraints.NORTHWEST
 
-    val row = JPanel(GridBagLayout()).apply { isOpaque = false }
-    val label = JLabel(caption).apply {
-        labelFor = widget
-    }
-    row.add(label, GridBagConstraints().apply {
-        gridx = 0
-        gridy = 0
-        anchor = GridBagConstraints.WEST
-        insets = Insets(0, 0, 0, 8)
-    })
-
-    widget.maximumSize = Dimension(Int.MAX_VALUE, widget.preferredSize.height)
-    row.add(widget, GridBagConstraints().apply {
-        gridx = 1
-        gridy = 0
-        weightx = 1.0
-        fill = GridBagConstraints.HORIZONTAL
-        insets = Insets(0, 0, 0, if (trailing.isNotEmpty()) 12 else 0)
-    })
-
-    trailing.forEachIndexed { index, component ->
-        row.add(component, GridBagConstraints().apply {
-            gridx = 2 + index
-            gridy = 0
-            anchor = GridBagConstraints.WEST
-            insets = Insets(0, if (index == 0) 0 else 8, 0, 0)
-        })
-    }
-
-    panel.add(row, cs)
+    panel.add(buildInlineRow(caption, widget, trailing), cs)
 
     cs.gridx = previousGridX
     cs.gridwidth = previousGridWidth
