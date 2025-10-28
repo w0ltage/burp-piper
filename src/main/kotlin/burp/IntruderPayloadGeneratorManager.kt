@@ -471,6 +471,7 @@ private class GeneratorEditorPanel(
             validationTab.updateParameterInputs(parametersTab.parameters)
         }
         header.nameField.columns = 24
+        header.setScopeVisible(false)
         header.templateCombo.addActionListener {
             if (!loading) {
                 applyTemplate(header.templateCombo.selectedItem as? TemplateOption)

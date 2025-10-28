@@ -227,7 +227,6 @@ private class ViewerHeaderPanel(
 ) : WorkspaceHeaderPanel<ViewerTemplateOption>(
     templateLabel = "Template",
     onChange = onChange,
-    includeScopeField = true,
 ) {
 
     private var templates: List<ViewerTemplateOption> = emptyList()

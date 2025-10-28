@@ -214,7 +214,6 @@ class MinimalToolWidget(
         templateLabel = "Template",
         onChange = { onHeaderChanged() },
         includeTemplateField = false,
-        includeScopeField = showScope,
     )
     private val filterPanel = if (showFilter) {
         WorkspaceFilterPanel(parent) { onFilterChanged() }
@@ -263,6 +262,9 @@ class MinimalToolWidget(
                 scope = tool.scope,
             ),
         )
+        if (!showScope) {
+            header.setScopeVisible(false)
+        }
         layout = BorderLayout()
         add(header, BorderLayout.NORTH)
         add(tabs, BorderLayout.CENTER)
