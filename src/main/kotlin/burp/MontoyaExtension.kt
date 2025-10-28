@@ -30,6 +30,7 @@ import java.net.MalformedURLException
 import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.net.URL
 import java.lang.reflect.InvocationTargetException
 import java.time.LocalDateTime
@@ -553,32 +554,67 @@ class MontoyaExtension : BurpExtension {
 
     private fun handleGUI(process: Process, tools: List<Piper.MinimalTool>) {
         val textPane = AnsiTextPane()
-        val scrollPane = JScrollPane(textPane).apply {
-            val backgroundColor = textPane.background
-            background = backgroundColor
-            viewport.background = backgroundColor
+        val latch = CountDownLatch(1)
+
+        SwingUtilities.invokeLater {
+            val scrollPane = JScrollPane(textPane).apply {
+                val backgroundColor = textPane.background
+                background = backgroundColor
+                viewport.background = backgroundColor
+            }
+
+            JFrame().apply {
+                defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
+                add(scrollPane)
+                setSize(675, 300)
+                title = tools.joinToString(separator = " | ", prefix = "$NAME - ", transform = Piper.MinimalTool::getName)
+                isVisible = true
+            }
+
+            latch.countDown()
         }
 
-        JFrame().apply {
-            defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
-            add(scrollPane)
-            setSize(675, 300)
-            title = tools.joinToString(separator = " | ", prefix = "$NAME - ", transform = Piper.MinimalTool::getName)
-            isVisible = true
+        try {
+            latch.await()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         }
 
-        val streams = listOf(process.inputStream, process.errorStream)
-        streams.forEach { stream ->
-            thread(start = true) {
-                stream.reader(Charsets.UTF_8).use { reader ->
-                    val buffer = CharArray(2048)
-                    while (true) {
-                        val read = reader.read(buffer)
-                        if (read == -1) break
-                        textPane.appendAnsi(String(buffer, 0, read))
+        listOf(process.inputStream, process.errorStream).forEach { stream ->
+            pumpStream(stream, textPane)
+        }
+    }
+
+    private fun pumpStream(stream: InputStream, textPane: AnsiTextPane) {
+        thread(name = "PiperConsolePump", isDaemon = true, start = true) {
+            stream.reader(Charsets.UTF_8).use { reader ->
+                val buffer = StringBuilder()
+                while (true) {
+                    val codePoint = reader.read()
+                    if (codePoint == -1) {
+                        flushBuffer(buffer, textPane)
+                        break
+                    }
+                    val ch = codePoint.toChar()
+                    buffer.append(ch)
+                    val shouldFlush = ch == '\n' || ch == '\r' ||
+                        buffer.length >= 256 || !reader.ready()
+                    if (shouldFlush) {
+                        flushBuffer(buffer, textPane)
                     }
                 }
             }
+        }
+    }
+
+    private fun flushBuffer(buffer: StringBuilder, textPane: AnsiTextPane) {
+        if (buffer.isEmpty()) return
+        val chunk = buffer.toString()
+        buffer.setLength(0)
+        if (SwingUtilities.isEventDispatchThread()) {
+            textPane.appendAnsi(chunk)
+        } else {
+            SwingUtilities.invokeLater { textPane.appendAnsi(chunk) }
         }
     }
 
