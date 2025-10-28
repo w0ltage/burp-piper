@@ -840,10 +840,13 @@ fun <T : Component> createLabeledWidget(caption: String, widget: T, panel: Conta
 
     cs.gridwidth = 3
     cs.gridx = 1
+    cs.fill = GridBagConstraints.HORIZONTAL
+    cs.weightx = if (previousWeightX > 0.0) previousWeightX else 1.0
+    cs.anchor = GridBagConstraints.WEST
+    panel.add(widget, cs)
     cs.fill = previousFill
     cs.weightx = previousWeightX
     cs.anchor = previousAnchor
-    panel.add(widget, cs)
     return widget
 }
 
@@ -1274,11 +1277,13 @@ class HexASCIITextField(
 
         val previousFill = cs.fill
         val previousWeightX = cs.weightx
+        val previousAnchor = cs.anchor
 
         cs.gridwidth = 1
         cs.gridx = 0
         cs.fill = GridBagConstraints.HORIZONTAL
         cs.weightx = 0.0
+        cs.anchor = GridBagConstraints.EAST
         val label = JLabel(caption).apply {
             horizontalAlignment = SwingConstants.RIGHT
             labelFor = tf
@@ -1287,10 +1292,13 @@ class HexASCIITextField(
 
         cs.gridx = 1
         cs.weightx = 1.0
+        cs.fill = GridBagConstraints.HORIZONTAL
+        cs.anchor = GridBagConstraints.WEST
         panel.add(tf, cs)
 
         cs.weightx = 0.0
         cs.fill = previousFill
+        cs.anchor = previousAnchor
 
         cs.gridx = 2
         panel.add(rbASCII, cs)
@@ -1299,6 +1307,7 @@ class HexASCIITextField(
 
         cs.fill = previousFill
         cs.weightx = previousWeightX
+        cs.anchor = previousAnchor
     }
 
     fun setValue(source: ByteString) {
