@@ -152,8 +152,7 @@ private abstract class MinimalToolInlineEditor<T>(
 
     private val cards = JPanel(CardLayout())
     private val placeholder = JPanel(BorderLayout())
-    private val formPanel = JPanel(GridBagLayout())
-    private val scrollPane = JScrollPane(formPanel)
+    private val detailPanel = JPanel(BorderLayout())
     private var widget: MinimalToolWidget? = null
     private var dirtyListener: (() -> Unit)? = null
 
@@ -163,7 +162,7 @@ private abstract class MinimalToolInlineEditor<T>(
     init {
         placeholder.add(JLabel("Select an item to edit", SwingConstants.CENTER), BorderLayout.CENTER)
         cards.add(placeholder, "empty")
-        cards.add(scrollPane, "form")
+        cards.add(detailPanel, "form")
         add(cards, BorderLayout.CENTER)
     }
 
@@ -174,43 +173,26 @@ private abstract class MinimalToolInlineEditor<T>(
         currentValue = value
         if (value == null) {
             (cards.layout as CardLayout).show(cards, "empty")
-            formPanel.removeAll()
+            detailPanel.removeAll()
             widget = null
             return
         }
-        formPanel.removeAll()
-        val cs = GridBagConstraints().apply {
-            fill = GridBagConstraints.BOTH
-            anchor = GridBagConstraints.FIRST_LINE_START
-            weightx = 1.0
-            weighty = 1.0
-            gridx = 0
-            gridy = 0
-            insets = Insets(2, 0, 2, 0)
-        }
         widget = MinimalToolWidget(
             extractCommon(value),
-            formPanel,
-            cs,
             locateParentComponent(),
             config.showPassHeaders,
             config.purpose,
             config.showScope,
             config.showFilter,
         )
-        widget?.setDirtyListener { notifyDirty() }
-        widget?.addCommandChangeListener { notifyDirty() }
-        addCustomFields(value, formPanel, cs)
-        val fillerConstraints = GridBagConstraints().apply {
-            gridx = 0
-            gridy = cs.gridy + 1
-            gridwidth = 4
-            weightx = 1.0
-            weighty = 1.0
-            fill = GridBagConstraints.BOTH
+        detailPanel.removeAll()
+        widget?.let { minimal ->
+            detailPanel.add(minimal, BorderLayout.CENTER)
+            minimal.setDirtyListener { notifyDirty() }
+            minimal.addCommandChangeListener { notifyDirty() }
+            addCustomFields(value, detailPanel, GridBagConstraints())
+            attachDirtyListeners(minimal)
         }
-        formPanel.add(JPanel().apply { isOpaque = false }, fillerConstraints)
-        attachDirtyListeners(formPanel)
         (cards.layout as CardLayout).show(cards, "form")
         revalidate()
         repaint()

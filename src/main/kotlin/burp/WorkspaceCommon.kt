@@ -651,6 +651,7 @@ class WorkspaceFilterPanel(
     private val filterPanel = MessageMatchEditorPanel(parent)
     private val summaryLabel = JLabel("Filter description → (none)")
     private val sampleLabel = JLabel("Matched sample: –")
+    private val listeners = mutableListOf<(Piper.MessageMatch?) -> Unit>()
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -667,6 +668,7 @@ class WorkspaceFilterPanel(
         filterPanel.addChangeListener {
             updateSummary()
             onChange()
+            notifyListeners()
         }
     }
 
@@ -677,11 +679,20 @@ class WorkspaceFilterPanel(
 
     fun value(): Piper.MessageMatch? = filterPanel.value()
 
+    fun addChangeListener(listener: (Piper.MessageMatch?) -> Unit) {
+        listeners += listener
+    }
+
     private fun updateSummary() {
         val value = filterPanel.value()
         summaryLabel.text = "Filter description → " +
             (value?.toHumanReadable(negation = false, hideParentheses = true) ?: "(none)")
         sampleLabel.text = "Matched sample: preview unavailable"
+    }
+
+    private fun notifyListeners() {
+        val value = filterPanel.value()
+        listeners.forEach { it(value) }
     }
 }
 
@@ -689,15 +700,17 @@ data class WorkspaceCommandState(
     val command: Piper.CommandInvocation,
     val usesAnsi: Boolean = false,
     val dependencies: List<String> = emptyList(),
+    val passHeaders: Boolean = false,
 )
 
 class WorkspaceCommandPanel(
     parent: Component?,
-    private val onChange: () -> Unit,
+    onChange: (() -> Unit)? = null,
     private val purpose: CommandInvocationPurpose = CommandInvocationPurpose.SELF_FILTER,
     private val showAnsiCheckbox: Boolean = true,
     private val showDependenciesField: Boolean = true,
     private val dependenciesLabelText: String = "Binaries required in PATH (comma separated)",
+    private val showPassHeadersToggle: Boolean = false,
 ) : JPanel(BorderLayout()) {
 
     private val commandEditor = CommandInvocationEditor(
@@ -712,6 +725,18 @@ class WorkspaceCommandPanel(
     )
     private val ansiCheck = if (showAnsiCheckbox) JCheckBox("Uses ANSI (color) escape sequences") else null
     private val dependenciesField = if (showDependenciesField) JTextField() else null
+    private val listeners = mutableListOf<() -> Unit>().apply { onChange?.let(::add) }
+    private var applyingState = false
+    private val passHeadersControls = if (showPassHeadersToggle) {
+        createPassHeadersControls(commandEditor.passHeaders()) { value ->
+            commandEditor.setPassHeaders(value)
+            if (!applyingState) {
+                notifyChanged()
+            }
+        }
+    } else {
+        null
+    }
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -727,11 +752,23 @@ class WorkspaceCommandPanel(
         }
         content.add(commandEditor, cs)
 
+        passHeadersControls?.let { controls ->
+            cs.gridy++
+            cs.fill = GridBagConstraints.HORIZONTAL
+            content.add(controls.checkbox, cs)
+            cs.gridy++
+            content.add(controls.note, cs)
+        }
+
         ansiCheck?.let {
             cs.gridy++
             cs.fill = GridBagConstraints.HORIZONTAL
             content.add(it, cs)
-            it.addChangeListener { onChange() }
+            it.addChangeListener {
+                if (!applyingState) {
+                    notifyChanged()
+                }
+            }
         }
 
         dependenciesField?.let { field ->
@@ -739,23 +776,46 @@ class WorkspaceCommandPanel(
             content.add(JLabel(dependenciesLabelText), cs)
             cs.gridy++
             content.add(field, cs)
-            field.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
+            field.document.addDocumentListener(WorkspaceDocumentListener {
+                if (!applyingState) {
+                    notifyChanged()
+                }
+            })
         }
 
-        commandEditor.addChangeListener { onChange() }
+        commandEditor.addChangeListener {
+            if (!applyingState) {
+                notifyChanged()
+            }
+        }
 
         val scroll = JScrollPane(content)
         add(scroll, BorderLayout.CENTER)
-        commandEditor.display(Piper.CommandInvocation.getDefaultInstance())
+        display(null)
+    }
+
+    fun addChangeListener(listener: () -> Unit) {
+        listeners += listener
     }
 
     fun display(state: WorkspaceCommandState?) {
-        commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
-        ansiCheck?.isSelected = state?.usesAnsi ?: false
-        dependenciesField?.text = state?.dependencies?.joinToString(", ") ?: ""
+        applyingState = true
+        try {
+            commandEditor.display(state?.command ?: Piper.CommandInvocation.getDefaultInstance())
+            val dependencies = state?.dependencies?.joinToString(", ") ?: ""
+            ansiCheck?.isSelected = state?.usesAnsi ?: false
+            dependenciesField?.text = dependencies
+            val passHeaders = state?.passHeaders ?: false
+            passHeadersControls?.checkbox?.isSelected = passHeaders
+            commandEditor.setPassHeaders(passHeaders)
+        } finally {
+            applyingState = false
+        }
     }
 
     fun snapshot(): WorkspaceCommandState {
+        val passHeaders = passHeadersControls?.checkbox?.isSelected ?: commandEditor.passHeaders()
+        commandEditor.setPassHeaders(passHeaders)
         val command = runCatching { commandEditor.snapshot() }.getOrElse { error ->
             throw RuntimeException(error.message ?: "Invalid command configuration", error)
         }
@@ -767,10 +827,15 @@ class WorkspaceCommandPanel(
             command = command,
             usesAnsi = ansiCheck?.isSelected ?: false,
             dependencies = dependencies,
+            passHeaders = passHeaders,
         )
     }
 
     fun isAnsiSelected(): Boolean = ansiCheck?.isSelected ?: false
+
+    private fun notifyChanged() {
+        listeners.forEach { it.invoke() }
+    }
 }
 
 class WorkspaceHistoryPanel : JPanel(BorderLayout()) {

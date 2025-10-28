@@ -125,6 +125,7 @@ private fun ViewerEditorState.toCommandState(): WorkspaceCommandState = Workspac
     command = command,
     usesAnsi = usesColors,
     dependencies = dependencies,
+    passHeaders = command.passHeaders,
 )
 
 private class ViewerListModel<T>(
