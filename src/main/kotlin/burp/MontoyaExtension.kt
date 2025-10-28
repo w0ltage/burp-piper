@@ -611,7 +611,11 @@ class MontoyaExtension : BurpExtension {
         if (buffer.isEmpty()) return
         val chunk = buffer.toString()
         buffer.setLength(0)
-        textPane.appendAnsi(chunk)
+        if (SwingUtilities.isEventDispatchThread()) {
+            textPane.appendAnsi(chunk)
+        } else {
+            SwingUtilities.invokeLater { textPane.appendAnsi(chunk) }
+        }
     }
 
     private abstract inner class BaseMessageViewerEditor(
