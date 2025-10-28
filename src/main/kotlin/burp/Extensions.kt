@@ -177,6 +177,7 @@ fun Piper.CommandInvocation.execute(
     val substitutedArgs = applyParametersTo(args, resolvedParameters)
     val processBuilder = ProcessBuilder(substitutedArgs)
     val environment = processBuilder.environment()
+    applyDefaultEnvironment(environment)
     for ((key, value) in parameterEnvironment(resolvedParameters)) {
         environment[key] = value
     }
@@ -191,6 +192,10 @@ fun Piper.CommandInvocation.execute(
         }
     }
     return p to tempFiles
+}
+
+private fun applyDefaultEnvironment(environment: MutableMap<String, String>) {
+    environment.putIfAbsent("PYTHONUNBUFFERED", "1")
 }
 
 val Piper.CommandInvocationOrBuilder.hasFilter: Boolean
