@@ -1324,19 +1324,22 @@ class EnumSetWidget<E : Enum<E>>(set: Set<E>, panel: Container, cs: GridBagConst
 
     init {
         addFullWidthComponent(JLabel(caption), panel, cs)
-        cs.gridy++
-        cs.gridwidth = 1
+        val originalFill = cs.fill
+        val originalWeightX = cs.weightx
 
-        cbMap = enumClass.enumConstants.asIterable().associateWithTo(EnumMap(enumClass)) {
-            val cb = createCheckBox(it.toString(), it in set, panel, cs)
-            if (cs.gridx == 0) {
-                cs.gridx = 1
-            } else {
-                cs.gridy++
-                cs.gridx = 0
-            }
-            cb
+        cbMap = enumClass.enumConstants.asIterable().associateWithTo(EnumMap(enumClass)) { value ->
+            cs.gridy++
+            cs.gridx = 0
+            cs.gridwidth = 4
+            cs.fill = GridBagConstraints.HORIZONTAL
+            cs.weightx = 1.0
+            createCheckBox(value.toString(), value in set, panel, cs)
         }.toMap()
+
+        cs.gridwidth = 1
+        cs.fill = originalFill
+        cs.weightx = originalWeightX
+        cs.gridx = 0
     }
 }
 

@@ -655,7 +655,13 @@ class WorkspaceFilterPanel(
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
-        add(filterPanel, BorderLayout.CENTER)
+        val scroll = JScrollPane(filterPanel).apply {
+            border = BorderFactory.createEmptyBorder()
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            verticalScrollBar.unitIncrement = 16
+        }
+        add(scroll, BorderLayout.CENTER)
         val footer = JPanel()
         footer.layout = BoxLayout(footer, BoxLayout.Y_AXIS)
         footer.border = BorderFactory.createEmptyBorder(12, 0, 0, 0)
