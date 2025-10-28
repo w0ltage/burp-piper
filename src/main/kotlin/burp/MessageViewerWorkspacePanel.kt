@@ -15,6 +15,7 @@ import javax.swing.DefaultComboBoxModel
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JList
@@ -222,59 +223,62 @@ private fun createViewerOverviewPanel(): WorkspaceOverviewPanel<ViewerEditorStat
         renderViewerOverview(state)
     }
 
-private class ViewerHeaderPanel(
-    onChange: () -> Unit,
-) : WorkspaceHeaderPanel<ViewerTemplateOption>(
-    templateLabel = "Template",
-    onChange = onChange,
-) {
-
+private class ViewerHeader(onChange: () -> Unit) {
+    val panel = WorkspaceHeaderPanel<ViewerTemplateOption>("Template", onChange)
+    private val scopeCombo = JComboBox(ScopeOption.values())
     private var templates: List<ViewerTemplateOption> = emptyList()
 
     init {
+        panel.addTemplateAccessoryField("Scope", scopeCombo)
+        scopeCombo.addActionListener { onChange() }
         updateTemplates(null)
+        scopeCombo.selectedItem = ScopeOption.from(null)
     }
 
     fun apply(state: ViewerEditorState?) {
-        val selectedTemplate = updateTemplates(state?.templateId)
-        setValues(
+        val selectedId = state?.templateId
+        updateTemplates(selectedId)
+        panel.setValues(
             WorkspaceHeaderValues(
                 name = state?.name.orEmpty(),
                 enabled = state?.enabled ?: false,
-                template = selectedTemplate,
-                scope = state?.scope,
+                template = panel.templateCombo.selectedItem as? ViewerTemplateOption,
             ),
         )
+        scopeCombo.selectedItem = ScopeOption.from(state?.scope)
     }
 
     fun snapshot(): HeaderSnapshot {
-        val values = readValues()
+        val values = panel.readValues()
         val selectedTemplate = values.template ?: templates.firstOrNull()
         return HeaderSnapshot(
             name = values.name,
             enabled = values.enabled,
             templateId = selectedTemplate?.id,
-            scope = values.scope ?: Piper.MinimalTool.Scope.REQUEST_RESPONSE,
+            scope = (scopeCombo.selectedItem as ScopeOption).scope,
         )
     }
 
-    private fun updateTemplates(selectedId: String?): ViewerTemplateOption? {
+    fun setScopeEnabled(enabled: Boolean) {
+        scopeCombo.isEnabled = enabled
+    }
+
+    private fun updateTemplates(selectedId: String?) {
         templates = listOf(
             ViewerTemplateOption(null, "Custom", ""),
             ViewerTemplateOption("json", "JSON formatter", "jq based pretty-printer"),
             ViewerTemplateOption("asn1", "ASN.1 decoder", "openssl asn1parse"),
             ViewerTemplateOption("gzip", "GZIP inflator", "gzip --decompress"),
         )
-        val selected = templates.firstOrNull { it.id == selectedId } ?: templates.firstOrNull()
-        withTemplateChangeSuppressed {
-            templateCombo.model = DefaultComboBoxModel(templates.toTypedArray())
+        panel.withTemplateChangeSuppressed {
+            panel.templateCombo.model = DefaultComboBoxModel(templates.toTypedArray())
+            val selected = templates.firstOrNull { it.id == selectedId } ?: templates.firstOrNull()
             when {
-                selected != null -> templateCombo.selectedItem = selected
-                templateCombo.itemCount > 0 -> templateCombo.selectedIndex = 0
-                else -> templateCombo.selectedIndex = -1
+                selected != null -> panel.templateCombo.selectedItem = selected
+                panel.templateCombo.itemCount > 0 -> panel.templateCombo.selectedIndex = 0
+                else -> panel.templateCombo.selectedIndex = -1
             }
         }
-        return selected
     }
 }
 
@@ -284,6 +288,23 @@ private data class HeaderSnapshot(
     val templateId: String?,
     val scope: Piper.MinimalTool.Scope,
 )
+
+private enum class ScopeOption(val scope: Piper.MinimalTool.Scope, val label: String) {
+    BOTH(Piper.MinimalTool.Scope.REQUEST_RESPONSE, "Requests & Responses"),
+    REQUEST(Piper.MinimalTool.Scope.REQUEST_ONLY, "Requests"),
+    RESPONSE(Piper.MinimalTool.Scope.RESPONSE_ONLY, "Responses"),
+    ;
+
+    override fun toString(): String = label
+
+    companion object {
+        fun from(scope: Piper.MinimalTool.Scope?): ScopeOption = when (scope) {
+            Piper.MinimalTool.Scope.REQUEST_ONLY -> REQUEST
+            Piper.MinimalTool.Scope.RESPONSE_ONLY -> RESPONSE
+            else -> BOTH
+        }
+    }
+}
 
 private class CommentatorOptionsPanel(onChange: () -> Unit) : JPanel() {
     private val overwriteBox = JCheckBox("Overwrite existing comments")
@@ -324,7 +345,8 @@ class MessageViewerWorkspacePanel(
     private val saveButton = JButton("Save")
     private val cancelButton = JButton("Cancel")
     private val convertButton = JButton("Convert to commentator")
-    private val header = ViewerHeaderPanel { markDirty() }
+    private val headerController = ViewerHeader { markDirty() }
+    private val header = headerController.panel
     private val overview = createViewerOverviewPanel()
     private val filterTab = WorkspaceFilterPanel(parent) { markDirty() }
     private val commandTab = WorkspaceCommandPanel(parent, onChange = { markDirty() })
@@ -433,7 +455,7 @@ class MessageViewerWorkspacePanel(
         loading = true
         try {
             currentState = state?.copy()
-            header.apply(state)
+            headerController.apply(state)
             overview.display(state)
             filterTab.display(state?.filter)
             commandTab.display(state?.toCommandState())
@@ -454,7 +476,7 @@ class MessageViewerWorkspacePanel(
     }
 
     private fun collectStateFromUI(): ViewerEditorState? {
-        val snapshot = header.snapshot()
+        val snapshot = headerController.snapshot()
         val commandSnapshot = commandTab.snapshot()
         val filter = filterTab.value()
         val current = currentState ?: ViewerEditorState()
@@ -599,7 +621,8 @@ class CommentatorWorkspacePanel(
     private val searchField = JTextField()
     private val saveButton = JButton("Save")
     private val cancelButton = JButton("Cancel")
-    private val header = ViewerHeaderPanel { markDirty() }
+    private val headerController = ViewerHeader { markDirty() }
+    private val header = headerController.panel
     private val overview = createViewerOverviewPanel()
     private val filterTab = WorkspaceFilterPanel(parent) { markDirty() }
     private val commandTab = WorkspaceCommandPanel(parent, onChange = { markDirty() })
@@ -652,7 +675,7 @@ class CommentatorWorkspacePanel(
         tabs.addTab("Validation & Test", validationTab)
         tabs.addTab("History", WorkspaceHistoryPanel())
 
-        header.setScopeEnabled(false)
+        headerController.setScopeEnabled(false)
 
         footer.layout = BoxLayout(footer, BoxLayout.X_AXIS)
         saveButton.addActionListener { save() }
@@ -707,7 +730,7 @@ class CommentatorWorkspacePanel(
         loading = true
         try {
             currentState = state?.copy()
-            header.apply(state)
+            headerController.apply(state)
             overview.display(state)
             filterTab.display(state?.filter)
             commandTab.display(state?.toCommandState())
@@ -729,7 +752,7 @@ class CommentatorWorkspacePanel(
     }
 
     private fun collectStateFromUI(): ViewerEditorState? {
-        val snapshot = header.snapshot()
+        val snapshot = headerController.snapshot()
         val commandSnapshot = commandTab.snapshot()
         val filter = filterTab.value()
         val state = currentState ?: ViewerEditorState()

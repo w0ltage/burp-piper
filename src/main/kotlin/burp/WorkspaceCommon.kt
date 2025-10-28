@@ -52,7 +52,6 @@ data class WorkspaceHeaderValues<T>(
     val name: String,
     val enabled: Boolean,
     val template: T?,
-    val scope: Piper.MinimalTool.Scope? = null,
 )
 
 open class WorkspaceHeaderPanel<T>(
@@ -64,15 +63,10 @@ open class WorkspaceHeaderPanel<T>(
     val nameField = JTextField()
     val enabledToggle = JToggleButton("Enabled")
     val templateCombo = JComboBox<T>()
-    private val scopeLabel = JLabel("Scope")
-    private val scopeCombo = JComboBox(WorkspaceScopeOption.values())
 
     private var templateRowIndex = -1
     private var templateRowNextGridx = 2
     private var suppressTemplateEvent = false
-    private var suppressScopeEvent = false
-    private var scopeVisible = true
-    private var scopeEnabled = true
 
     init {
         border = EmptyBorder(12, 12, 12, 12)
@@ -89,13 +83,6 @@ open class WorkspaceHeaderPanel<T>(
             addComponent(templateCombo, gridx = 1, gridy = row, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL)
         }
 
-        if (includeTemplateField && templateRowIndex >= 0) {
-            addScopeAlongsideTemplate()
-        } else {
-            row++
-            addScopeAsRow(row)
-        }
-
         nameField.document.addDocumentListener(WorkspaceDocumentListener { onChange() })
         enabledToggle.addActionListener { onChange() }
         if (includeTemplateField) {
@@ -105,15 +92,10 @@ open class WorkspaceHeaderPanel<T>(
                 }
             }
         }
-        scopeCombo.addActionListener {
-            if (!suppressScopeEvent) {
-                onChange()
-            }
-        }
+    }
 
-        withScopeChangeSuppressed {
-            scopeCombo.selectedItem = WorkspaceScopeOption.from(null)
-        }
+    fun addTemplateAccessoryField(label: String, component: JComponent) {
+        addTemplateField(label, component)
     }
 
     protected fun addTemplateField(label: String, component: JComponent) {
@@ -138,18 +120,12 @@ open class WorkspaceHeaderPanel<T>(
         if (includeTemplateField) {
             templateCombo.isEnabled = enabled
         }
-        scopeCombo.isEnabled = enabled && scopeEnabled && scopeVisible
     }
 
     fun readValues(): WorkspaceHeaderValues<T> = WorkspaceHeaderValues(
         name = nameField.text,
         enabled = enabledToggle.isSelected,
         template = if (includeTemplateField) templateCombo.selectedItem as? T else null,
-        scope = if (scopeVisible) {
-            (scopeCombo.selectedItem as? WorkspaceScopeOption)?.scope
-        } else {
-            null
-        },
     )
 
     fun setValues(values: WorkspaceHeaderValues<T>) {
@@ -164,23 +140,6 @@ open class WorkspaceHeaderPanel<T>(
                 }
             }
         }
-        withScopeChangeSuppressed {
-            scopeCombo.selectedItem = WorkspaceScopeOption.from(values.scope)
-        }
-    }
-
-    fun setScopeEnabled(enabled: Boolean) {
-        scopeEnabled = enabled
-        scopeCombo.isEnabled = enabled && scopeVisible
-    }
-
-    fun setScopeVisible(visible: Boolean) {
-        scopeVisible = visible
-        scopeLabel.isVisible = visible
-        scopeCombo.isVisible = visible
-        scopeCombo.isEnabled = scopeEnabled && visible
-        revalidate()
-        repaint()
     }
 
     private fun addLabel(text: String, gridx: Int, gridy: Int) {
@@ -210,57 +169,6 @@ open class WorkspaceHeaderPanel<T>(
         this.anchor = GridBagConstraints.WEST
     }
 
-    private inline fun withScopeChangeSuppressed(block: () -> Unit) {
-        suppressScopeEvent = true
-        try {
-            block()
-        } finally {
-            suppressScopeEvent = false
-        }
-    }
-
-    private fun addScopeAlongsideTemplate() {
-        val labelConstraints = createConstraints(templateRowNextGridx, templateRowIndex)
-        add(scopeLabel, labelConstraints)
-        addComponent(
-            scopeCombo,
-            gridx = templateRowNextGridx + 1,
-            gridy = templateRowIndex,
-            weightx = 1.0,
-            fill = GridBagConstraints.HORIZONTAL,
-        )
-        templateRowNextGridx += 2
-    }
-
-    private fun addScopeAsRow(row: Int) {
-        val labelConstraints = createConstraints(0, row)
-        add(scopeLabel, labelConstraints)
-        addComponent(
-            scopeCombo,
-            gridx = 1,
-            gridy = row,
-            weightx = 1.0,
-            fill = GridBagConstraints.HORIZONTAL,
-        )
-    }
-
-}
-
-enum class WorkspaceScopeOption(val scope: Piper.MinimalTool.Scope, private val label: String) {
-    BOTH(Piper.MinimalTool.Scope.REQUEST_RESPONSE, "Requests & Responses"),
-    REQUEST(Piper.MinimalTool.Scope.REQUEST_ONLY, "Requests"),
-    RESPONSE(Piper.MinimalTool.Scope.RESPONSE_ONLY, "Responses"),
-    ;
-
-    override fun toString(): String = label
-
-    companion object {
-        fun from(scope: Piper.MinimalTool.Scope?): WorkspaceScopeOption = when (scope) {
-            Piper.MinimalTool.Scope.REQUEST_ONLY -> REQUEST
-            Piper.MinimalTool.Scope.RESPONSE_ONLY -> RESPONSE
-            else -> BOTH
-        }
-    }
 }
 
 class WorkspaceOverviewPanel<T>(
