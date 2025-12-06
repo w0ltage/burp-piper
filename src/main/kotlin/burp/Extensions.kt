@@ -291,7 +291,6 @@ fun Piper.Config.updateEnabled(value: Boolean): Piper.Config {
             .addAllHttpListener            (httpListenerList            .map { it.buildEnabled(value) })
             .addAllCommentator             (commentatorList             .map { it.buildEnabled(value) })
             .addAllIntruderPayloadProcessor(intruderPayloadProcessorList.map { it.buildEnabled(value) })
-            .addAllIntruderPayloadGenerator(intruderPayloadGeneratorList.map { it.buildEnabled(value) })
             .addAllHighlighter             (highlighterList             .map { it.buildEnabled(value) })
             .build()
 }

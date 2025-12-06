@@ -67,14 +67,6 @@ fun populatePiperTabs(
     )
 
     tabs.addTab(
-        "Intruder payload generators",
-        IntruderPayloadGeneratorManagerPanel(
-            cfg.intruderPayloadGeneratorsModel,
-            parent,
-        ),
-    )
-
-    tabs.addTab(
         "Highlighters",
         createHighlighterManager(
             cfg.highlightersModel,
