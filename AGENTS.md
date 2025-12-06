@@ -36,18 +36,33 @@ Piper integrates external tools and their pipelines to Burp Suite. The extension
 - Prefer composing editors from these widgets (as done in `MinimalToolManagerPanel` and `MessageViewerWorkspacePanel`) so split panes resize consistently across tools.
 
 ## Montoya API Access
-Because direct MCP access is unavailable, fetch Montoya API documentation via HTTP GET requests to Context7 when you need clarification.
+Proactively fetch Montoya API documentation and examples via HTTP GET requests to Context7 using the `fetch` tool.
 
-**Endpoint template**
+**When to fetch documentation:**
+- **Before implementing**: When you don't know how to implement a feature or where to start
+- **For understanding**: When you need to understand how Montoya API components work
+- **During development**: Before changing Montoya-dependent logic
+- **For debugging**: When encountering compilation errors tied to Montoya classes
+- **For verification**: When uncertain about method signatures, parameters, or return types
+
+**Endpoint templates**
+
+Montoya API Documentation (for understanding concepts and API structure):
 ```
 https://context7.com/api/v1/portswigger/burp-extensions-montoya-api?type=json&tokens=100000&topic=<TOPIC>
 ```
 
-**Usage guidelines**
-- Form topics with 2–4 technical keywords (e.g., `ui%20suite%20tab`, `http%20request%20builder`).
-- Query before changing Montoya-dependent logic or when encountering compilation errors tied to Montoya classes.
-- Parse the JSON response and extract method signatures or examples relevant to the task at hand.
-- Retry with refined terms if the response lacks the needed details.
+Montoya API Usage Examples (for implementation patterns and code samples):
+```
+https://context7.com/api/web/docs/code/portswigger/burp-extensions-montoya-api-examples?tokens=100000&type=json&topic=<TOPIC>
+```
+
+**Usage guidelines:**
+1. **Start with examples**: If you don't know where to start, fetch usage examples first
+2. **Form effective topics**: Use 2–4 technical keywords (e.g., `ui%20suite%20tab`, `http%20request%20builder`, `scanner%20check`)
+3. **Parse responses**: Extract method signatures, usage patterns, and examples relevant to your task
+4. **Iterate if needed**: Retry with refined terms if the response lacks needed details
+5. **Combine sources**: Use both endpoints when needed—documentation for understanding, examples for implementation
 
 ## Logging & Diagnostics
 - Use `api.logging().logToOutput()` for informational messages and `logToError()` for failures.
