@@ -4,14 +4,9 @@ import burp.api.montoya.BurpExtension
 import burp.api.montoya.MontoyaApi
 import burp.api.montoya.core.ByteArray
 import burp.api.montoya.core.Registration
-import burp.api.montoya.intruder.AttackConfiguration
-import burp.api.montoya.intruder.GeneratedPayload
-import burp.api.montoya.intruder.PayloadData
-import burp.api.montoya.intruder.PayloadGenerator
-import burp.api.montoya.intruder.PayloadGeneratorProvider
-import burp.api.montoya.intruder.IntruderInsertionPoint
 import burp.api.montoya.intruder.PayloadProcessingResult
 import burp.api.montoya.intruder.PayloadProcessor
+import burp.api.montoya.intruder.PayloadData
 import burp.api.montoya.ui.Selection
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider
@@ -27,7 +22,6 @@ import burp.api.montoya.http.message.responses.HttpResponse
 import burp.api.montoya.utilities.ByteUtils
 import java.awt.Component
 import java.net.MalformedURLException
-import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -67,15 +61,9 @@ class MontoyaExtension : BurpExtension {
     private lateinit var configModel: ConfigModel
 
     private lateinit var processorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
-    private lateinit var generatorManager: MontoyaRegisteredToolManager<Piper.MinimalTool>
     private lateinit var messageViewerManager: MontoyaMessageViewerManager
     @Suppress("unused")
     private var contextMenuRegistration: Registration? = null
-
-    private val emptyPayloadGenerator = object : PayloadGenerator {
-        override fun generatePayloadFor(insertionPoint: IntruderInsertionPoint?): GeneratedPayload =
-            GeneratedPayload.end()
-    }
 
     private val saveOnChangeListener = object : ListDataListener {
         override fun contentsChanged(e: ListDataEvent) = saveConfig()
@@ -113,12 +101,6 @@ class MontoyaExtension : BurpExtension {
             configModel.intruderPayloadProcessorsModel,
             { it.enabled },
             { registerPayloadProcessor(it) }
-        )
-
-        generatorManager = MontoyaRegisteredToolManager(
-            configModel.intruderPayloadGeneratorsModel,
-            { it.enabled },
-            { registerPayloadGenerator(it) }
         )
 
         messageViewerManager = MontoyaMessageViewerManager(configModel.messageViewersModel)
@@ -175,37 +157,12 @@ class MontoyaExtension : BurpExtension {
                     }
                 }
 
-                val processed = getStdoutWithErrorHandling(tool.cmd.execute(currentBytes), tool)
+                val processed = getStdoutWithErrorHandling(tool.cmd.execute(*arrayOf(currentBytes)), tool)
                 return PayloadProcessingResult.usePayload(montoyaBytes(processed))
             }
         }
 
         return api.intruder().registerPayloadProcessor(processor)
-    }
-
-    private fun registerPayloadGenerator(tool: Piper.MinimalTool): Registration? {
-        if (!tool.enabled) return null
-
-        val provider = object : PayloadGeneratorProvider {
-            override fun displayName(): String = tool.name
-
-            override fun providePayloadGenerator(attackConfiguration: AttackConfiguration?): PayloadGenerator {
-                val parameterValues = promptParameters(tool)
-                if (parameterValues == null) {
-                    api.logging().logToOutput("Piper: Payload generator \"${tool.name}\" was cancelled by the user.")
-                    return emptyPayloadGenerator
-                }
-                val resolvedParameters = try {
-                    tool.cmd.resolveParameterValues(parameterValues)
-                } catch (e: IllegalArgumentException) {
-                    api.logging().logToError("Piper: ${e.message}")
-                    return emptyPayloadGenerator
-                }
-                return PiperPayloadGenerator(tool, resolvedParameters)
-            }
-        }
-
-        return api.intruder().registerPayloadGeneratorProvider(provider)
     }
 
     private fun promptParameters(tool: Piper.MinimalTool): Map<String, String>? {
@@ -847,45 +804,6 @@ class MontoyaExtension : BurpExtension {
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-        }
-    }
-
-    private inner class PiperPayloadGenerator(
-        private val tool: Piper.MinimalTool,
-        private val parameters: Map<String, String>,
-    ) : PayloadGenerator {
-        private var execution: Pair<Process, List<File>>? = null
-        private var reader: BufferedReader? = null
-
-        override fun generatePayloadFor(insertionPoint: burp.api.montoya.intruder.IntruderInsertionPoint?): GeneratedPayload {
-            val line = stdout()?.readLine()
-            return if (line == null) {
-                close()
-                GeneratedPayload.end()
-            } else {
-                GeneratedPayload.payload(montoyaBytes(line.toByteArray(Charsets.ISO_8859_1)))
-            }
-        }
-
-        private fun stdout(): BufferedReader? {
-            val existing = reader
-            if (existing != null) {
-                return existing
-            }
-
-            val exec = tool.cmd.execute(parameters, kotlin.ByteArray(0))
-            execution = exec
-            val newReader = exec.first.inputStream.bufferedReader(charset = Charsets.ISO_8859_1)
-            reader = newReader
-            return newReader
-        }
-
-        private fun close() {
-            reader?.close()
-            execution?.first?.destroy()
-            execution?.second?.forEach(File::delete)
-            reader = null
-            execution = null
         }
     }
 

@@ -176,93 +176,6 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         }
     }
 
-    private inner class IntruderPayloadGeneratorManager : RegisteredToolManager<Piper.MinimalTool, IIntruderPayloadGeneratorFactory>(
-            configModel.intruderPayloadGeneratorsModel, callbacks::removeIntruderPayloadGeneratorFactory, callbacks::registerIntruderPayloadGeneratorFactory) {
-        override fun isModelItemEnabled(item: Piper.MinimalTool): Boolean = item.enabled
-
-        private val emptyPayloadGenerator = object : IIntruderPayloadGenerator {
-            override fun reset() {}
-            override fun getNextPayload(baseValue: ByteArray?): ByteArray = ByteArray(0)
-            override fun hasMorePayloads(): Boolean = false
-        }
-
-        override fun modelToBurp(modelItem: Piper.MinimalTool): IIntruderPayloadGeneratorFactory = object : IIntruderPayloadGeneratorFactory {
-            override fun createNewInstance(attack: IIntruderAttack?): IIntruderPayloadGenerator {
-                val parameters = promptForCommandParameters(null, modelItem.name, modelItem.cmd)
-                if (parameters == null) {
-                    callbacks.printOutput("Piper: Payload generator \"${modelItem.name}\" was cancelled by the user.")
-                    return emptyPayloadGenerator
-                }
-                val resolvedParameters = try {
-                    modelItem.cmd.resolveParameterValues(parameters)
-                } catch (e: IllegalArgumentException) {
-                    callbacks.printError("Piper: ${e.message}")
-                    return emptyPayloadGenerator
-                }
-
-                return object : IIntruderPayloadGenerator {
-                    private var execution: Pair<Process, List<File>>? = null
-                    private var reader: BufferedReader? = null
-                    private var finished = false
-
-                    override fun reset() {
-                        closeExecution()
-                        finished = false
-                    }
-
-                    override fun getNextPayload(baseValue: ByteArray?): ByteArray {
-                        val nextLine = stdout()?.readLine()
-                        return if (nextLine == null) {
-                            finished = true
-                            closeExecution()
-                            ByteArray(0)
-                        } else {
-                            nextLine.toByteArray(charset = Charsets.ISO_8859_1)
-                        }
-                    }
-
-                    override fun hasMorePayloads(): Boolean {
-                        if (finished) {
-                            return false
-                        }
-                        val currentReader = reader
-                        val process = execution?.first
-                        return when {
-                            currentReader == null -> true
-                            process?.isAlive == true -> true
-                            else -> currentReader.ready()
-                        }
-                    }
-
-                    private fun stdout(): BufferedReader? {
-                        if (finished) {
-                            return null
-                        }
-                        val existing = reader
-                        if (existing != null) {
-                            return existing
-                        }
-                        val exec = modelItem.cmd.execute(resolvedParameters, ByteArray(0))
-                        execution = exec
-                        val newReader = exec.first.inputStream.bufferedReader(charset = Charsets.ISO_8859_1)
-                        reader = newReader
-                        return newReader
-                    }
-
-                    private fun closeExecution() {
-                        reader?.close()
-                        execution?.first?.destroy()
-                        execution?.second?.forEach(File::delete)
-                        reader = null
-                        execution = null
-                    }
-                }
-            }
-
-            override fun getGeneratorName(): String = modelItem.name
-        }
-    }
-
     private abstract inner class RegisteredToolManager<M, B>(private val model: DefaultListModel<M>,
                                                     private val remove: (B) -> Unit,
                                                     private val add: (B) -> Unit) : ListDataListener {
@@ -308,7 +221,6 @@ class BurpExtender : IBurpExtender, ITab, ListDataListener, IHttpListener {
         configModel.macrosModel.addListDataListener(MacroManager())
         configModel.httpListenersModel.addListDataListener(HttpListenerManager())
         configModel.intruderPayloadProcessorsModel.addListDataListener(IntruderPayloadProcessorManager())
-        configModel.intruderPayloadGeneratorsModel.addListDataListener(IntruderPayloadGeneratorManager())
 
         configModel.addPropertyChangeListener({ saveConfig() })
 
@@ -939,7 +851,6 @@ class ConfigModel(config: Piper.Config = Piper.Config.getDefaultInstance()) {
     val commentatorsModel = DefaultListModel<Piper.Commentator>()
     val intruderPayloadProcessorsModel = DefaultListModel<Piper.MinimalTool>()
     val highlightersModel = DefaultListModel<Piper.Highlighter>()
-    val intruderPayloadGeneratorsModel = DefaultListModel<Piper.MinimalTool>()
 
     private var _developer = config.developer
     var developer: Boolean
@@ -964,7 +875,6 @@ class ConfigModel(config: Piper.Config = Piper.Config.getDefaultInstance()) {
         fillDefaultModel(config.commentatorList,                           commentatorsModel)
         fillDefaultModel(config.intruderPayloadProcessorList, intruderPayloadProcessorsModel)
         fillDefaultModel(config.highlighterList,                           highlightersModel)
-        fillDefaultModel(config.intruderPayloadGeneratorList, intruderPayloadGeneratorsModel)
     }
 
     fun serialize(): Piper.Config = Piper.Config.newBuilder()
@@ -975,7 +885,6 @@ class ConfigModel(config: Piper.Config = Piper.Config.getDefaultInstance()) {
             .addAllCommentator(commentatorsModel.toIterable())
             .addAllIntruderPayloadProcessor(intruderPayloadProcessorsModel.toIterable())
             .addAllHighlighter(highlightersModel.toIterable())
-            .addAllIntruderPayloadGenerator(intruderPayloadGeneratorsModel.toIterable())
             .setDeveloper(developer)
             .build()
 }
@@ -1053,7 +962,6 @@ private class LoadSavePanel(
             cfg.commentatorsModel,
             cfg.intruderPayloadProcessorsModel,
             cfg.highlightersModel,
-            cfg.intruderPayloadGeneratorsModel,
         ).forEach { it.addListDataListener(this) }
     }
 
