@@ -31,6 +31,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.EnumMap
 import java.util.TreeMap
+import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -838,6 +839,11 @@ class MontoyaExtension : BurpExtension {
                 return fmt.parse(configFile.readBytes()).updateEnabled(true)
             }
 
+            api.persistence().preferences().getString(EXTENSION_SETTINGS_KEY)?.let { encoded ->
+                val decoded = Base64.getDecoder().decode(encoded)
+                return Piper.Config.parseFrom(decoded)
+            }
+
             val persisted = api.persistence().extensionData().getByteArray(EXTENSION_SETTINGS_KEY)
             if (persisted != null) {
                 return Piper.Config.parseFrom(persisted.getBytes())
@@ -852,7 +858,9 @@ class MontoyaExtension : BurpExtension {
     }
 
     private fun saveConfig(cfg: Piper.Config = configModel.serialize()) {
-        api.persistence().extensionData().setByteArray(EXTENSION_SETTINGS_KEY, montoyaBytes(cfg.toByteArray()))
+        val serialized = cfg.toByteArray()
+        api.persistence().preferences().setString(EXTENSION_SETTINGS_KEY, Base64.getEncoder().encodeToString(serialized))
+        api.persistence().extensionData().setByteArray(EXTENSION_SETTINGS_KEY, montoyaBytes(serialized))
     }
 
     private fun getStdoutWithErrorHandling(executionResult: Pair<Process, List<File>>, tool: Piper.MinimalTool): kotlin.ByteArray =
